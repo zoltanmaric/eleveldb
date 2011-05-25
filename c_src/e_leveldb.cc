@@ -343,7 +343,6 @@ ERL_NIF_TERM e_leveldb_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         handle->options = opts;
         ERL_NIF_TERM result = enif_make_resource(env, handle);
         enif_release_resource(handle);
-        printf("DB OPEN\n");
         return enif_make_tuple2(env, ATOM_OK, result);
     }
     else
@@ -686,7 +685,6 @@ ERL_NIF_TERM e_leveldb_status(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
 static void e_leveldb_db_resource_cleanup(ErlNifEnv* env, void* arg)
 {
     // Delete any dynamically allocated memory stored in e_leveldb_db_handle
-    printf("DB CLOSE\n");
     e_leveldb_db_handle* handle = (e_leveldb_db_handle*)arg;
     if (handle->options.block_cache != 0)
         delete handle->options.block_cache;
