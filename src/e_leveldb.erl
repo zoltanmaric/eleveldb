@@ -218,6 +218,7 @@ fail1_test() ->
     ok = ?MODULE:put(Ref, <<"1">>, <<"1">>, []),
     {ok, Snapshot} = ?MODULE:snapshot(Ref),
     erlang:put(fail, Snapshot).
+    %%?MODULE:snapshot_close(Snapshot).
 
 fail2_test() ->
     {ok, Ref} = open("/tmp/eleveldb.fail.test", [{create_if_missing, false}]),
