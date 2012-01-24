@@ -1,0 +1,77 @@
+diff --git a/db/version_set.cc b/db/version_set.cc
+index afa7e09..539b559 100644
+--- a/db/version_set.cc
++++ b/db/version_set.cc
+@@ -1247,18 +1247,30 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
+       current_->GetOverlappingInputs(level+1, &new_start, &new_limit,
+                                      &expanded1);
+       if (expanded1.size() == c->inputs_[1].size()) {
+-        Log(options_->info_log,
+-            "Expanding@%d %d+%d to %d+%d\n",
+-            level,
+-            int(c->inputs_[0].size()),
+-            int(c->inputs_[1].size()),
+-            int(expanded0.size()),
+-            int(expanded1.size()));
+-        smallest = new_start;
+-        largest = new_limit;
+-        c->inputs_[0] = expanded0;
+-        c->inputs_[1] = expanded1;
+-        GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
++        if ((expanded0.size() - c->inputs_[0].size()) +
++            (expanded1.size() - c->inputs_[1].size()) > options_->max_compact_expansion) {
++           Log(options_->info_log,
++               "Expanding@%d %d+%d to %d+%d cancelled due to limit %d\n",
++               level,
++               int(c->inputs_[0].size()),
++               int(c->inputs_[1].size()),
++               int(expanded0.size()),
++               int(expanded1.size()),
++               options_->max_compact_expansion);
++        } else {
++            Log(options_->info_log,
++                "Expanding@%d %d+%d to %d+%d\n",
++                level,
++                int(c->inputs_[0].size()),
++                int(c->inputs_[1].size()),
++                int(expanded0.size()),
++                int(expanded1.size()));
++            smallest = new_start;
++            largest = new_limit;
++            c->inputs_[0] = expanded0;
++            c->inputs_[1] = expanded1;
++            GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
++        }
+       }
+     }
+   }
+diff --git a/include/leveldb/options.h b/include/leveldb/options.h
+index 79111a0..956de53 100644
+--- a/include/leveldb/options.h
++++ b/include/leveldb/options.h
+@@ -127,6 +127,11 @@ struct Options {
+   // efficiently detect that and will switch to uncompressed mode.
+   CompressionType compression;
+ 
++  // Maximum number of files to expand during a compaction
++  //
++  // Default: 4 billion, which is effectively no limit
++  unsigned int max_compact_expansion;
++
+   // Create an Options object with default values for all fields.
+   Options();
+ };
+diff --git a/util/options.cc b/util/options.cc
+index bb97838..e5d745d 100644
+--- a/util/options.cc
++++ b/util/options.cc
+@@ -21,7 +21,8 @@ Options::Options()
+       block_cache(NULL),
+       block_size(4096),
+       block_restart_interval(16),
+-      compression(kSnappyCompression) {
++      compression(kSnappyCompression),
++      max_compact_expansion(4000000000) {
+ }
+ 
+ 

@@ -79,6 +79,7 @@ static ERL_NIF_TERM ATOM_PARANOID_CHECKS;
 static ERL_NIF_TERM ATOM_ERROR_DB_DESTROY;
 static ERL_NIF_TERM ATOM_KEYS_ONLY;
 static ERL_NIF_TERM ATOM_COMPRESSION;
+static ERL_NIF_TERM ATOM_MAX_COMPACT_EXPANSION;
 
 static ErlNifFunc nif_funcs[] =
 {
@@ -148,6 +149,12 @@ ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Optio
             {
                 opts.compression = leveldb::kNoCompression;
             }
+        }
+        else if (option[0] == ATOM_MAX_COMPACT_EXPANSION)
+        {
+            unsigned long max_compact_expansion;
+            if (enif_get_ulong(env, option[1], &max_compact_expansion))
+                opts.max_compact_expansion = max_compact_expansion;
         }
     }
 
@@ -660,6 +667,7 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     ATOM(ATOM_ERROR_DB_DESTROY, "error_db_destroy");
     ATOM(ATOM_KEYS_ONLY, "keys_only");
     ATOM(ATOM_COMPRESSION, "compression");
+    ATOM(ATOM_MAX_COMPACT_EXPANSION, "max_compact_expansion");
     return 0;
 }
 
