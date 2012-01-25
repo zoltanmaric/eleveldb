@@ -1,0 +1,120 @@
+  commit 4b9effd4f2eb0fe02ea451b0e6d7840c6470dbb5
+  Author: Scott Lystig Fritchie <slfritchie@snookles.com>
+  Date:   Tue Jan 24 21:31:04 2012 -0600
+  
+      Add Status kWouldBlock code and 'put_waits_for_compaction' option
+      
+      The kWouldBlock status could would be returned by
+      DBImpl::MakeRoomForWrite if the new 'put_waits_for_compaction'
+      option is false.  This allows a caller of DB::Put() and
+      DB::Delete() to retry if they wish.
+      
+      The new 'put_waits_for_compaction' option is true by default.
+
+diff --git a/db/db_impl.cc b/db/db_impl.cc
+index 3ca6337..1edf04e 100644
+--- a/db/db_impl.cc
++++ b/db/db_impl.cc
+@@ -1197,13 +1197,21 @@ Status DBImpl::MakeRoomForWrite(bool force) {
+       // We have filled up the current memtable, but the previous
+       // one is still being compacted, so we wait.
+       Log(options_.info_log, "waiting - imm != NULL (%p)... %d loops\n", imm_, loops);
+-      bg_cv_.Wait();
++      if (options_.put_waits_for_compaction) {
++          bg_cv_.Wait();
++      } else {
++          return Status::WouldBlock();
++      }
+     } else if ((l0files=versions_->NumLevelFiles(0)) >= config::kL0_StopWritesTrigger) {
+     //} else if ((l0files=versions_->NumLevelBytes(0)) >= 10*1024*1024) {
+       // There are too many level-0 files.
+       Log(options_.info_log, "waiting - too many L0 %u > %u... %d loops\n",
+          l0files, config::kL0_StopWritesTrigger, loops);
+-      bg_cv_.Wait();
++      if (options_.put_waits_for_compaction) {
++          bg_cv_.Wait();
++      } else {
++          return Status::WouldBlock();
++      }
+     } else {
+       // Attempt to switch to a new memtable and trigger compaction of old
+       assert(versions_->PrevLogNumber() == 0);
+diff --git a/include/leveldb/options.h b/include/leveldb/options.h
+index 956de53..78efe29 100644
+--- a/include/leveldb/options.h
++++ b/include/leveldb/options.h
+@@ -132,6 +132,12 @@ struct Options {
+   // Default: 4 billion, which is effectively no limit
+   unsigned int max_compact_expansion;
+ 
++  // If a put would block for a background compaction, we wait for it
++  // if put_waits_for_compaction is true
++  //
++  // Default: true
++  bool put_waits_for_compaction;
++
+   // Create an Options object with default values for all fields.
+   Options();
+ };
+diff --git a/include/leveldb/status.h b/include/leveldb/status.h
+index 3355fac..7ba49a9 100644
+--- a/include/leveldb/status.h
++++ b/include/leveldb/status.h
+@@ -47,6 +47,9 @@ class Status {
+   static Status IOError(const Slice& msg, const Slice& msg2 = Slice()) {
+     return Status(kIOError, msg, msg2);
+   }
++  static Status WouldBlock() {
++    return Status(kWouldBlock, "op", "would block");
++  }
+ 
+   // Returns true iff the status indicates success.
+   bool ok() const { return (state_ == NULL); }
+@@ -54,6 +57,9 @@ class Status {
+   // Returns true iff the status indicates a NotFound error.
+   bool IsNotFound() const { return code() == kNotFound; }
+ 
++  // Returns true iff the status indicates a WouldBlock error.
++  bool IsWouldBlock() const { return code() == kWouldBlock; }
++
+   // Return a string representation of this status suitable for printing.
+   // Returns the string "OK" for success.
+   std::string ToString() const;
+@@ -72,7 +78,8 @@ class Status {
+     kCorruption = 2,
+     kNotSupported = 3,
+     kInvalidArgument = 4,
+-    kIOError = 5
++    kIOError = 5,
++    kWouldBlock = 6
+   };
+ 
+   Code code() const {
+diff --git a/util/options.cc b/util/options.cc
+index e5d745d..7fac188 100644
+--- a/util/options.cc
++++ b/util/options.cc
+@@ -22,7 +22,8 @@ Options::Options()
+       block_size(4096),
+       block_restart_interval(16),
+       compression(kSnappyCompression),
+-      max_compact_expansion(4000000000) {
++      max_compact_expansion(4000000000),
++      put_waits_for_compaction(true) {
+ }
+ 
+ 
+diff --git a/util/status.cc b/util/status.cc
+index a44f35b..1876132 100644
+--- a/util/status.cc
++++ b/util/status.cc
+@@ -58,6 +58,9 @@ std::string Status::ToString() const {
+       case kIOError:
+         type = "IO error: ";
+         break;
++      case kWouldBlock:
++        type = "Would block: ";
++        break;
+       default:
+         snprintf(tmp, sizeof(tmp), "Unknown code(%d): ",
+                  static_cast<int>(code()));

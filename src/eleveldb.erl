@@ -98,11 +98,24 @@ get(_Ref, _Key, _Opts) ->
 
 -spec put(db_ref(), binary(), binary(), write_options()) -> ok | {error, any()}.
 put(Ref, Key, Value, Opts) ->
-    write(Ref, [{put, Key, Value}], Opts).
+    erl_write(Ref, [{put, Key, Value}], Opts, 0).
 
 -spec delete(db_ref(), binary(), write_options()) -> ok | {error, any()}.
 delete(Ref, Key, Opts) ->
-    write(Ref, [{delete, Key}], Opts).
+    erl_write(Ref, [{delete, Key}], Opts, 0).
+
+erl_write(Ref, Updates, Opts, Count) ->
+    case write(Ref, Updates, Opts) of
+        wouldblock ->
+            Max = 3,
+            Sleep = if Count < Max -> 1 bsl Count;
+                       true        -> 1 bsl Max
+                    end,
+            timer:sleep(Sleep),
+            erl_write(Ref, Updates, Opts, Count + 1);
+        Else ->
+            Else
+    end.
 
 -spec write(db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
 write(_Ref, _Updates, _Opts) ->

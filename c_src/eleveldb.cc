@@ -80,6 +80,8 @@ static ERL_NIF_TERM ATOM_ERROR_DB_DESTROY;
 static ERL_NIF_TERM ATOM_KEYS_ONLY;
 static ERL_NIF_TERM ATOM_COMPRESSION;
 static ERL_NIF_TERM ATOM_MAX_COMPACT_EXPANSION;
+static ERL_NIF_TERM ATOM_PUT_WAITS_FOR_COMPACTION;
+static ERL_NIF_TERM ATOM_WOULDBLOCK;
 
 static ErlNifFunc nif_funcs[] =
 {
@@ -155,6 +157,17 @@ ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Optio
             unsigned long max_compact_expansion;
             if (enif_get_ulong(env, option[1], &max_compact_expansion))
                 opts.max_compact_expansion = max_compact_expansion;
+        }
+        else if (option[0] == ATOM_PUT_WAITS_FOR_COMPACTION)
+        {
+            if (option[1] == ATOM_TRUE)
+            {
+                opts.put_waits_for_compaction = true;
+            }
+            else
+            {
+                opts.put_waits_for_compaction = false;
+            }
         }
     }
 
@@ -359,8 +372,14 @@ ERL_NIF_TERM eleveldb_write(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
             {
                 return ATOM_OK;
             }
+            else if (status.IsWouldBlock())
+            {
+                return ATOM_WOULDBLOCK;
+            }
             else
             {
+                leveldb::Status xx = leveldb::Status::WouldBlock();
+                fprintf(stderr, "xx IsWouldBlock %d status %s\r\n", xx.IsWouldBlock(), xx.ToString().c_str());
                 return error_tuple(env, ATOM_ERROR_DB_WRITE, status);
             }
         }
@@ -668,6 +687,8 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     ATOM(ATOM_KEYS_ONLY, "keys_only");
     ATOM(ATOM_COMPRESSION, "compression");
     ATOM(ATOM_MAX_COMPACT_EXPANSION, "max_compact_expansion");
+    ATOM(ATOM_WOULDBLOCK, "wouldblock");
+    ATOM(ATOM_PUT_WAITS_FOR_COMPACTION, "put_waits_for_compaction");
     return 0;
 }
 
