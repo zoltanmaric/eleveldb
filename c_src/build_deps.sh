@@ -46,7 +46,7 @@ case "$1" in
 
     get-deps)
         if [ ! -d leveldb ]; then
-            git clone git://github.com/basho/leveldb
+            git clone git://github.com/bsparrow435/leveldb
             (cd leveldb && git checkout $LEVELDB_VSN)
         fi
         ;;
@@ -65,7 +65,7 @@ case "$1" in
         export LD_LIBRARY_PATH="$BASEDIR/system/lib:$LD_LIBRARY_PATH"
 
         if [ ! -d leveldb ]; then
-            git clone git://github.com/basho/leveldb
+            git clone git://github.com/bsparrow435/leveldb
             (cd leveldb && git checkout $LEVELDB_VSN)
         fi
 
