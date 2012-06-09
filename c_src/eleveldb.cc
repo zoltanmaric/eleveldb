@@ -545,10 +545,12 @@ ERL_NIF_TERM eleveldb_status(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]
 ERL_NIF_TERM eleveldb_repair(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
     char name[4096];
-    if (enif_get_string(env, argv[0], name, sizeof(name), ERL_NIF_LATIN1))
+    if (enif_get_string(env, argv[0], name, sizeof(name), ERL_NIF_LATIN1) &&
+        enif_is_list(env, argv[1]))
     {
         // Parse out the options
         leveldb::Options opts;
+        fold(env, argv[1], parse_open_option, opts);
 
         leveldb::Status status = leveldb::RepairDB(name, opts);
         if (!status.ok())
