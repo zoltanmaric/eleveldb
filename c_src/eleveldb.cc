@@ -316,6 +316,7 @@ ERL_NIF_TERM error_tuple(ErlNifEnv* env, ERL_NIF_TERM error, leveldb::Status& st
 
 ASYNC_NIF_DECL(eleveldb_open,
  { // args struct
+
     char filename[1024];
     leveldb::Options opts;
  },
@@ -365,6 +366,7 @@ ASYNC_NIF_DECL(eleveldb_open,
 
 ASYNC_NIF_DECL(eleveldb_close,
  { // args struct
+
    eleveldb_db_handle* db_handle;
  },
  { // pre
@@ -396,6 +398,7 @@ ASYNC_NIF_DECL(eleveldb_close,
 
 ASYNC_NIF_DECL(eleveldb_get,
  { // args struct
+
    eleveldb_db_handle* db_handle;
    leveldb::ReadOptions opts;
    ErlNifBinary key;
@@ -456,6 +459,7 @@ ASYNC_NIF_DECL(eleveldb_get,
 
 ASYNC_NIF_DECL(eleveldb_write,
  { // args struct
+
    eleveldb_db_handle* db_handle;
    leveldb::WriteOptions opts;
    leveldb::WriteBatch batch;
@@ -585,6 +589,7 @@ static ERL_NIF_TERM slice_to_binary(ErlNifEnv* env, leveldb::Slice s)
 
 ASYNC_NIF_DECL(eleveldb_iterator_move,
  { // args struct
+
     eleveldb_itr_handle* itr_handle;
     ERL_NIF_TERM op;
     ErlNifBinary key;
@@ -596,7 +601,7 @@ ASYNC_NIF_DECL(eleveldb_iterator_move,
    }
 
    // Cursor operation or key<<>>
-   args->op = NULL;
+   args->op = 0;
    if (enif_is_binary(env, argv[1])) {
      enif_inspect_binary(env, argv[1], &args->key);
    } else if (enif_is_atom(env, argv[1])) {
@@ -942,18 +947,18 @@ static int on_upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, ER
 
 static ErlNifFunc nif_funcs[] =
 {
-    {"open_int", 2, eleveldb_open},
-    {"close_int", 1, eleveldb_close},
-    {"get_int", 3, eleveldb_get},
-    {"write_int", 3, eleveldb_write},
-    {"iterator_int", 2, eleveldb_iterator},
+    {"open_int", 3, eleveldb_open},
+    {"close_int", 2, eleveldb_close},
+    {"get_int", 4, eleveldb_get},
+    {"write_int", 4, eleveldb_write},
     {"iterator_int", 3, eleveldb_iterator},
-    {"iterator_move_int", 2, eleveldb_iterator_move},
-    {"iterator_close_int", 1, eleveldb_iterator_close},
-    {"status_int", 2, eleveldb_status},
-    {"destroy_int", 2, eleveldb_destroy},
-    {"repair_int", 2, eleveldb_repair},
-    {"is_empty_int", 1, eleveldb_is_empty},
+    {"iterator_int", 4, eleveldb_iterator},
+    {"iterator_move_int", 3, eleveldb_iterator_move},
+    {"iterator_close_int", 2, eleveldb_iterator_close},
+    {"status_int", 3, eleveldb_status},
+    {"destroy_int", 3, eleveldb_destroy},
+    {"repair_int", 3, eleveldb_repair},
+    {"is_empty_int", 2, eleveldb_is_empty},
 };
 
 extern "C" {

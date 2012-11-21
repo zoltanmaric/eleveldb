@@ -52,6 +52,37 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+-define(ASYNC_NIF_CALL(Fun, Args),
+        begin
+            Ref = erlang:make_ref(),
+            case erlang:apply(?MODULE, Fun, [Ref|Args]) of
+                {ok, Metric} ->
+                    erlang:bump_reductions(Metric * 100), %% TODO: 100 is a *guess*
+                    receive
+                        {Ref, Reply} ->
+                            Reply
+                    end;
+                Other -> Other
+            end
+        end).
+
+%% These are called via erlang:apply/3 within ASYNC_NIF_CALL()s
+-compile([{nowarn_unused_function,
+           [
+            {open_int, 3},
+            {close_int, 2},
+            {get_int, 4},
+            {write_int, 4},
+            {iterator_int, 3},
+            {iterator_int, 4},
+            {iterator_move_int, 3},
+            {iterator_close_int, 2},
+            {status_int, 3},
+            {destroy_int, 3},
+            {repair_int, 3},
+            {is_empty_int, 2}
+           ]}]).
+
 -spec init() -> ok | {error, any()}.
 init() ->
     SoName = case code:priv_dir(?MODULE) of
@@ -96,66 +127,58 @@ init() ->
 
 -spec open(string(), open_options()) -> {ok, db_ref()} | {error, any()}.
 open(Name, Opts) ->
-    eleveldb_bump:big(),
-    open_int(Name, Opts).
+    ?ASYNC_NIF_CALL(open_int, [Name, Opts]).
 
-open_int(_Name, _Opts) ->
+open_int(_Ref, _Name, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec close(db_ref()) -> ok | {error, any()}.
-close(Ref) ->
-    eleveldb_bump:big(),
-    close_int(Ref).
+close(DbRef) ->
+    ?ASYNC_NIF_CALL(close_int, [DbRef]).
 
-close_int(_Ref) ->
+close_int(_Ref, _DbRef) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec get(db_ref(), binary(), read_options()) -> {ok, binary()} | not_found | {error, any()}.
-get(Ref, Key, Opts) ->
-    eleveldb_bump:big(),
-    get_int(Ref, Key, Opts).
+get(DbRef, Key, Opts) ->
+    ?ASYNC_NIF_CALL(get_int, [DbRef, Key, Opts]).
 
-get_int(_Ref, _Key, _Opts) ->
+get_int(_Ref, _DbRef, _Key, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec put(db_ref(), binary(), binary(), write_options()) -> ok | {error, any()}.
-put(Ref, Key, Value, Opts) ->
-    eleveldb_bump:big(),
-    put_int(Ref, Key, Value, Opts).
+put(DbRef, Key, Value, Opts) ->
+    put_int(DbRef, Key, Value, Opts).
 
-put_int(Ref, Key, Value, Opts) ->
-    write(Ref, [{put, Key, Value}], Opts).
+put_int(DbRef, Key, Value, Opts) ->
+    write(DbRef, [{put, Key, Value}], Opts).
 
 -spec delete(db_ref(), binary(), write_options()) -> ok | {error, any()}.
-delete(Ref, Key, Opts) ->
-    eleveldb_bump:big(),
-    delete_int(Ref, Key, Opts).
+delete(DbRef, Key, Opts) ->
+    delete_int(DbRef, Key, Opts).
 
-delete_int(Ref, Key, Opts) ->
-    write(Ref, [{delete, Key}], Opts).
+delete_int(DbRef, Key, Opts) ->
+    write(DbRef, [{delete, Key}], Opts).
 
 -spec write(db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
-write(Ref, Updates, Opts) ->
-    eleveldb_bump:big(),
-    write_int(Ref, Updates, Opts).
+write(DbRef, Updates, Opts) ->
+    ?ASYNC_NIF_CALL(write_int, [DbRef, Updates, Opts]).
 
-write_int(_Ref, _Updates, _Opts) ->
+write_int(_Ref, _DbRef, _Updates, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator(db_ref(), read_options()) -> {ok, itr_ref()}.
-iterator(Ref, Opts) ->
-    eleveldb_bump:small(),
-    iterator_int(Ref, Opts).
+iterator(DbRef, Opts) ->
+    ?ASYNC_NIF_CALL(iterator_int, [DbRef, Opts]).
 
-iterator_int(_Ref, _Opts) ->
+iterator_int(_Ref, _DbRef, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator(db_ref(), read_options(), keys_only) -> {ok, itr_ref()}.
-iterator(Ref, Opts, keys_only) ->
-    eleveldb_bump:small(),
-    iterator_int(Ref, Opts, keys_only).
+iterator(DbRef, Opts, keys_only) ->
+    ?ASYNC_NIF_CALL(iterator_int, [DbRef, Opts, keys_only]).
 
-iterator_int(_Ref, _Opts, keys_only) ->
+iterator_int(_Ref, _DbRef, _Opts, keys_only) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator_move(itr_ref(), iterator_action()) -> {ok, Key::binary(), Value::binary()} |
@@ -163,19 +186,17 @@ iterator_int(_Ref, _Opts, keys_only) ->
                                                      {error, invalid_iterator} |
                                                      {error, iterator_closed}.
 iterator_move(IRef, Loc) ->
-    eleveldb_bump:big(),
-    iterator_move_int(IRef, Loc).
+    ?ASYNC_NIF_CALL(iterator_move_int, [IRef, Loc]).
 
-iterator_move_int(_IRef, _Loc) ->
+iterator_move_int(_Ref, _IRef, _Loc) ->
     erlang:nif_error({error, not_loaded}).
 
 
 -spec iterator_close(itr_ref()) -> ok.
 iterator_close(IRef) ->
-    eleveldb_bump:small(),
-    iterator_close_int(IRef).
+    ?ASYNC_NIF_CALL(iterator_close_int, [IRef]).
 
-iterator_close_int(_IRef) ->
+iterator_close_int(_Ref, _IRef) ->
     erlang:nif_error({error, not_loaded}).
 
 -type fold_fun() :: fun(({Key::binary(), Value::binary()}, any()) -> any()).
@@ -183,8 +204,8 @@ iterator_close_int(_IRef) ->
 %% Fold over the keys and values in the database
 %% will throw an exception if the database is closed while the fold runs
 -spec fold(db_ref(), fold_fun(), any(), read_options()) -> any().
-fold(Ref, Fun, Acc0, Opts) ->
-    {ok, Itr} = iterator(Ref, Opts),
+fold(DbRef, Fun, Acc0, Opts) ->
+    {ok, Itr} = iterator(DbRef, Opts),
     do_fold(Itr, Fun, Acc0, Opts).
 
 -type fold_keys_fun() :: fun((Key::binary(), any()) -> any()).
@@ -192,39 +213,35 @@ fold(Ref, Fun, Acc0, Opts) ->
 %% Fold over the keys in the database
 %% will throw an exception if the database is closed while the fold runs
 -spec fold_keys(db_ref(), fold_keys_fun(), any(), read_options()) -> any().
-fold_keys(Ref, Fun, Acc0, Opts) ->
-    {ok, Itr} = iterator(Ref, Opts, keys_only),
+fold_keys(DbRef, Fun, Acc0, Opts) ->
+    {ok, Itr} = iterator(DbRef, Opts, keys_only),
     do_fold(Itr, Fun, Acc0, Opts).
 
 -spec status(db_ref(), Key::binary()) -> {ok, binary()} | error.
-status(Ref, Key) ->
-    eleveldb_bump:small(),
-    status_int(Ref, Key).
+status(DbRef, Key) ->
+    ?ASYNC_NIF_CALL(status_int, [DbRef, Key]).
 
-status_int(_Ref, _Key) ->
+status_int(_Ref, _DbRef, _Key) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec destroy(string(), open_options()) -> ok | {error, any()}.
 destroy(Name, Opts) ->
-    eleveldb_bump:big(),
-    destroy_int(Name, Opts).
+    ?ASYNC_NIF_CALL(destroy_int, [Name, Opts]).
 
-destroy_int(_Name, _Opts) ->
+destroy_int(_Ref, _Name, _Opts) ->
     erlang:nif_error({erlang, not_loaded}).
 
 repair(Name, Opts) ->
-    eleveldb_bump:big(),
-    repair_int(Name, Opts).
+    ?ASYNC_NIF_CALL(repair_int, [Name, Opts]).
 
-repair_int(_Name, _Opts) ->
+repair_int(_Ref, _Name, _Opts) ->
     erlang:nif_error({erlang, not_loaded}).
 
 -spec is_empty(db_ref()) -> boolean().
-is_empty(Ref) ->
-    eleveldb_bump:big(),
-    is_empty_int(Ref).
+is_empty(DbRef) ->
+    ?ASYNC_NIF_CALL(is_empty_int, [DbRef]).
 
-is_empty_int(_Ref) ->
+is_empty_int(_Ref, _DbRef) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec option_types(open | read | write) -> [{atom(), bool | integer | any}].
@@ -355,19 +372,19 @@ compression_test() ->
                                                    {compression, true}]),
     [ok = ?MODULE:put(Ref1, <<I:64/unsigned>>, CompressibleData, [{sync, true}]) ||
         I <- lists:seq(1,10)],
-	%% Check both of the LOG files created to see if the compression option was correctly
-	%% passed down
-	MatchCompressOption =
-		fun(File, Expected) ->
-				{ok, Contents} = file:read_file(File),
-				case re:run(Contents, "Options.compression: " ++ Expected) of
-					{match, _} -> match;
-					nomatch -> nomatch
-				end
-		end,
-	Log0Option = MatchCompressOption("/tmp/eleveldb.compress.0/LOG", "0"),
-	Log1Option = MatchCompressOption("/tmp/eleveldb.compress.1/LOG", "1"),
-	?assert(Log0Option =:= match andalso Log1Option =:= match).
+        %% Check both of the LOG files created to see if the compression option was correctly
+        %% passed down
+        MatchCompressOption =
+                fun(File, Expected) ->
+                                {ok, Contents} = file:read_file(File),
+                                case re:run(Contents, "Options.compression: " ++ Expected) of
+                                        {match, _} -> match;
+                                        nomatch -> nomatch
+                                end
+                end,
+        Log0Option = MatchCompressOption("/tmp/eleveldb.compress.0/LOG", "0"),
+        Log1Option = MatchCompressOption("/tmp/eleveldb.compress.1/LOG", "1"),
+        ?assert(Log0Option =:= match andalso Log1Option =:= match).
 
 
 close_test() ->
@@ -397,7 +414,7 @@ values() ->
 ops(Keys, Values) ->
     {oneof([put, delete]), oneof(Keys), oneof(Values)}.
 
-apply_kv_ops([], _Ref, Acc0) ->
+apply_kv_ops([], _DbRef, Acc0) ->
     Acc0;
 apply_kv_ops([{put, K, V} | Rest], Ref, Acc0) ->
     ok = eleveldb:put(Ref, K, V, []),
