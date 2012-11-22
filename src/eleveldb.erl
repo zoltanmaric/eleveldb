@@ -56,8 +56,8 @@
         begin
             NIFRef = erlang:make_ref(),
             case erlang:apply(Fun, [NIFRef|Args]) of
-                {ok, _QDepth} ->
-                    bitcask_bump:big(), %% TODO: evaluate bumping based on QDepth
+                {ok, Metric} ->
+                    erlang:bump_reductions(Metric),
                     receive
                         {NIFRef, Reply} ->
                             Reply
@@ -66,22 +66,6 @@
             end
         end).
 
-%% These are called via erlang:apply/3 within ASYNC_NIF_CALL()s
--compile([{nowarn_unused_function,
-           [
-            {open_int, 3},
-            {close_int, 2},
-            {get_int, 4},
-            {write_int, 4},
-            {iterator_int, 3},
-            {iterator_int, 4},
-            {iterator_move_int, 3},
-            {iterator_close_int, 2},
-            {status_int, 3},
-            {destroy_int, 3},
-            {repair_int, 3},
-            {is_empty_int, 2}
-           ]}]).
 
 -spec init() -> ok | {error, any()}.
 init() ->
