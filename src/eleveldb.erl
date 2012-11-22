@@ -54,12 +54,12 @@
 
 -define(ASYNC_NIF_CALL(Fun, Args),
         begin
-            Ref = erlang:make_ref(),
-            case erlang:apply(?MODULE, Fun, [Ref|Args]) of
-                {ok, Metric} ->
-                    erlang:bump_reductions(Metric * 100), %% TODO: 100 is a *guess*
+            NIFRef = erlang:make_ref(),
+            case erlang:apply(Fun, [NIFRef|Args]) of
+                {ok, _QDepth} ->
+                    bitcask_bump:big(), %% TODO: evaluate bumping based on QDepth
                     receive
-                        {Ref, Reply} ->
+                        {NIFRef, Reply} ->
                             Reply
                     end;
                 Other -> Other
@@ -127,21 +127,21 @@ init() ->
 
 -spec open(string(), open_options()) -> {ok, db_ref()} | {error, any()}.
 open(Name, Opts) ->
-    ?ASYNC_NIF_CALL(open_int, [Name, Opts]).
+    ?ASYNC_NIF_CALL(fun open_int/3, [Name, Opts]).
 
 open_int(_Ref, _Name, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec close(db_ref()) -> ok | {error, any()}.
 close(DbRef) ->
-    ?ASYNC_NIF_CALL(close_int, [DbRef]).
+    ?ASYNC_NIF_CALL(fun close_int/2, [DbRef]).
 
 close_int(_Ref, _DbRef) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec get(db_ref(), binary(), read_options()) -> {ok, binary()} | not_found | {error, any()}.
 get(DbRef, Key, Opts) ->
-    ?ASYNC_NIF_CALL(get_int, [DbRef, Key, Opts]).
+    ?ASYNC_NIF_CALL(fun get_int/4, [DbRef, Key, Opts]).
 
 get_int(_Ref, _DbRef, _Key, _Opts) ->
     erlang:nif_error({error, not_loaded}).
@@ -162,21 +162,21 @@ delete_int(DbRef, Key, Opts) ->
 
 -spec write(db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
 write(DbRef, Updates, Opts) ->
-    ?ASYNC_NIF_CALL(write_int, [DbRef, Updates, Opts]).
+    ?ASYNC_NIF_CALL(fun write_int/4, [DbRef, Updates, Opts]).
 
 write_int(_Ref, _DbRef, _Updates, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator(db_ref(), read_options()) -> {ok, itr_ref()}.
 iterator(DbRef, Opts) ->
-    ?ASYNC_NIF_CALL(iterator_int, [DbRef, Opts]).
+    ?ASYNC_NIF_CALL(fun iterator_int/3, [DbRef, Opts]).
 
 iterator_int(_Ref, _DbRef, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator(db_ref(), read_options(), keys_only) -> {ok, itr_ref()}.
 iterator(DbRef, Opts, keys_only) ->
-    ?ASYNC_NIF_CALL(iterator_int, [DbRef, Opts, keys_only]).
+    ?ASYNC_NIF_CALL(fun iterator_int/4, [DbRef, Opts, keys_only]).
 
 iterator_int(_Ref, _DbRef, _Opts, keys_only) ->
     erlang:nif_error({error, not_loaded}).
@@ -186,7 +186,7 @@ iterator_int(_Ref, _DbRef, _Opts, keys_only) ->
                                                      {error, invalid_iterator} |
                                                      {error, iterator_closed}.
 iterator_move(IRef, Loc) ->
-    ?ASYNC_NIF_CALL(iterator_move_int, [IRef, Loc]).
+    ?ASYNC_NIF_CALL(fun iterator_move_int/3, [IRef, Loc]).
 
 iterator_move_int(_Ref, _IRef, _Loc) ->
     erlang:nif_error({error, not_loaded}).
@@ -194,7 +194,7 @@ iterator_move_int(_Ref, _IRef, _Loc) ->
 
 -spec iterator_close(itr_ref()) -> ok.
 iterator_close(IRef) ->
-    ?ASYNC_NIF_CALL(iterator_close_int, [IRef]).
+    ?ASYNC_NIF_CALL(fun iterator_close_int/2, [IRef]).
 
 iterator_close_int(_Ref, _IRef) ->
     erlang:nif_error({error, not_loaded}).
@@ -219,27 +219,27 @@ fold_keys(DbRef, Fun, Acc0, Opts) ->
 
 -spec status(db_ref(), Key::binary()) -> {ok, binary()} | error.
 status(DbRef, Key) ->
-    ?ASYNC_NIF_CALL(status_int, [DbRef, Key]).
+    ?ASYNC_NIF_CALL(fun status_int/3, [DbRef, Key]).
 
 status_int(_Ref, _DbRef, _Key) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec destroy(string(), open_options()) -> ok | {error, any()}.
 destroy(Name, Opts) ->
-    ?ASYNC_NIF_CALL(destroy_int, [Name, Opts]).
+    ?ASYNC_NIF_CALL(fun destroy_int/3, [Name, Opts]).
 
 destroy_int(_Ref, _Name, _Opts) ->
     erlang:nif_error({erlang, not_loaded}).
 
 repair(Name, Opts) ->
-    ?ASYNC_NIF_CALL(repair_int, [Name, Opts]).
+    ?ASYNC_NIF_CALL(fun repair_int/3, [Name, Opts]).
 
 repair_int(_Ref, _Name, _Opts) ->
     erlang:nif_error({erlang, not_loaded}).
 
 -spec is_empty(db_ref()) -> boolean().
 is_empty(DbRef) ->
-    ?ASYNC_NIF_CALL(is_empty_int, [DbRef]).
+    ?ASYNC_NIF_CALL(fun is_empty_int/2, [DbRef]).
 
 is_empty_int(_Ref, _DbRef) ->
     erlang:nif_error({error, not_loaded}).
