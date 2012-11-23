@@ -113,14 +113,32 @@ init() ->
 
 -spec open(string(), open_options()) -> {ok, db_ref()} | {error, any()}.
 open(Name, Opts) ->
-    ?ASYNC_NIF_CALL(fun open_int/3, [Name, Opts]).
+    case ?ASYNC_NIF_CALL(fun open_nif/3, [Name, Opts]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 open_nif(_Ref, _Name, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec close(db_ref()) -> ok | {error, any()}.
 close(DbRef) ->
-    ?ASYNC_NIF_CALL(fun close_int/2, [DbRef]).
+    case ?ASYNC_NIF_CALL(fun close_nif/2, [DbRef]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 
 close_nif(_Ref, _DbRef) ->
@@ -128,7 +146,16 @@ close_nif(_Ref, _DbRef) ->
 
 -spec get(db_ref(), binary(), read_options()) -> {ok, binary()} | not_found | {error, any()}.
 get(DbRef, Key, Opts) ->
-    ?ASYNC_NIF_CALL(fun get_int/4, [DbRef, Key, Opts]).
+    case ?ASYNC_NIF_CALL(fun get_nif/4, [DbRef, Key, Opts]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 get_nif(_Ref, _DbRef, _Key, _Opts) ->
     erlang:nif_error({error, not_loaded}).
@@ -149,7 +176,16 @@ delete_int(DbRef, Key, Opts) ->
 
 -spec write(db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
 write(DbRef, Updates, Opts) ->
-    ?ASYNC_NIF_CALL(fun write_int/4, [DbRef, Updates, Opts]).
+    case ?ASYNC_NIF_CALL(fun write_nif/4, [DbRef, Updates, Opts]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 
 write_nif(_Ref, _DbRef, _Updates, _Opts) ->
@@ -157,7 +193,16 @@ write_nif(_Ref, _DbRef, _Updates, _Opts) ->
 
 -spec iterator(db_ref(), read_options()) -> {ok, itr_ref()}.
 iterator(DbRef, Opts) ->
-    ?ASYNC_NIF_CALL(fun iterator_int/3, [DbRef, Opts]).
+    case ?ASYNC_NIF_CALL(fun iterator_nif/3, [DbRef, Opts]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 
 iterator_nif(_Ref, _DbRef, _Opts) ->
@@ -165,7 +210,16 @@ iterator_nif(_Ref, _DbRef, _Opts) ->
 
 -spec iterator(db_ref(), read_options(), keys_only) -> {ok, itr_ref()}.
 iterator(DbRef, Opts, keys_only) ->
-    ?ASYNC_NIF_CALL(fun iterator_int/4, [DbRef, Opts, keys_only]).
+    case ?ASYNC_NIF_CALL(fun iterator_nif/4, [DbRef, Opts, keys_only]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 iterator_nif(_Ref, _DbRef, _Opts, keys_only) ->
     erlang:nif_error({error, not_loaded}).
@@ -175,7 +229,16 @@ iterator_nif(_Ref, _DbRef, _Opts, keys_only) ->
                                                      {error, invalid_iterator} |
                                                      {error, iterator_closed}.
 iterator_move(IRef, Loc) ->
-    ?ASYNC_NIF_CALL(fun iterator_move_int/3, [IRef, Loc]).
+    case ?ASYNC_NIF_CALL(fun iterator_move_nif/3, [IRef, Loc]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 iterator_move_nif(_Ref, _IRef, _Loc) ->
     erlang:nif_error({error, not_loaded}).
@@ -183,7 +246,17 @@ iterator_move_nif(_Ref, _IRef, _Loc) ->
 
 -spec iterator_close(itr_ref()) -> ok.
 iterator_close(IRef) ->
-    ?ASYNC_NIF_CALL(fun iterator_close_int/2, [IRef]).
+    case ?ASYNC_NIF_CALL(fun iterator_close_nif/2, [IRef]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
+
 
 iterator_close_nif(_Ref, _IRef) ->
     erlang:nif_error({error, not_loaded}).
@@ -208,14 +281,32 @@ fold_keys(DbRef, Fun, Acc0, Opts) ->
 
 -spec status(db_ref(), Key::binary()) -> {ok, binary()} | error.
 status(DbRef, Key) ->
-    ?ASYNC_NIF_CALL(fun status_int/3, [DbRef, Key]).
+    case ?ASYNC_NIF_CALL(fun status_nif/3, [DbRef, Key]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 status_nif(_Ref, _DbRef, _Key) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec destroy(string(), open_options()) -> ok | {error, any()}.
 destroy(Name, Opts) ->
-    ?ASYNC_NIF_CALL(fun destroy_int/3, [Name, Opts]).
+    case ?ASYNC_NIF_CALL(fun destroy_nif/3, [Name, Opts]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 -spec destroy_nif(reference(), string(), open_options()) -> ok | {error, any()}.
 destroy_nif(_Ref, _Name, _Opts) ->
@@ -223,7 +314,16 @@ destroy_nif(_Ref, _Name, _Opts) ->
 
 -spec repair(string(), repair_options()) -> ok | {error, any()}.
 repair(Name, Opts) ->
-    ?ASYNC_NIF_CALL(fun repair_int/3, [Name, Opts]).
+    case ?ASYNC_NIF_CALL(fun repair_nif/3, [Name, Opts]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 -spec repair_nif(reference(), string(), repair_options()) -> ok | {error, any()}.
 repair_nif(_Ref, _Name, _Opts) ->
@@ -231,7 +331,16 @@ repair_nif(_Ref, _Name, _Opts) ->
 
 -spec is_empty(db_ref()) -> boolean().
 is_empty(DbRef) ->
-    ?ASYNC_NIF_CALL(fun is_empty_int/2, [DbRef]).
+    case ?ASYNC_NIF_CALL(fun is_empty_nif/2, [DbRef]) of
+        {error, shutdown}=Error ->
+            %% Work unit was not executed, requeue it.
+            Error;
+        {error, _Reason}=Error ->
+            %% Work unit returned an error.
+            Error;
+        {ok, Result} ->
+            Result
+    end.
 
 -spec is_empty_nif(reference(), db_ref()) -> boolean().
 is_empty_nif(_Ref, _DbRef) ->
