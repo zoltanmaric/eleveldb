@@ -159,15 +159,16 @@ static void *anif_worker_fn(void *arg)
    * Workers are active while there is work on the queue to do and
    * only in the idle list when they are waiting on new work.
    */
-  do {
+  for(;;) {
     /* Examine the request queue, are there things to be done? */
-    enif_mutex_lock(anif_req_mutex); check_again_for_work:
+    enif_mutex_lock(anif_req_mutex);
+    enif_mutex_lock(anif_worker_mutex);
+    LIST_INSERT_HEAD(&anif_idle_workers, worker, entries);
+    enif_mutex_unlock(anif_worker_mutex);
+    check_again_for_work:
     if (anif_shutdown) { enif_mutex_unlock(anif_req_mutex); break; }
     if ((req = STAILQ_FIRST(&anif_reqs)) == NULL) {
       /* Queue is empty, join the list of idle workers and wait for work */
-      enif_mutex_lock(anif_worker_mutex);
-      LIST_INSERT_HEAD(&anif_idle_workers, worker, entries);
-      enif_mutex_unlock(anif_worker_mutex);
       enif_cond_wait(anif_cnd, anif_req_mutex);
       goto check_again_for_work;
     } else {
@@ -190,14 +191,13 @@ static void *anif_worker_fn(void *arg)
       ErlNifPid pid;
       enif_get_local_pid(req->env, req->pid, &pid);
       req->fn_work(req->env, req->ref, &pid, req->args);
-      ErlNifEnv *env = req->env;
       req->fn_post(req->args);
       enif_free(req->args);
       enif_free(req->argv);
-      enif_free_env(env);
+      enif_free_env(req->env);
       enif_free(req);
     }
-  } while(1);
+  }
   enif_thread_exit(0);
   return 0;
 }
