@@ -103,6 +103,8 @@ init() ->
                           {delete, Key::binary()} |
                           clear].
 
+-type repair_options() :: [].
+
 -type iterator_action() :: first | last | next | prev | binary().
 
 -opaque db_ref() :: binary().
@@ -208,30 +210,33 @@ fold_keys(DbRef, Fun, Acc0, Opts) ->
 status(DbRef, Key) ->
     ?ASYNC_NIF_CALL(fun status_int/3, [DbRef, Key]).
 
-status_int(_Ref, _DbRef, _Key) ->
+status_nif(_Ref, _DbRef, _Key) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec destroy(string(), open_options()) -> ok | {error, any()}.
 destroy(Name, Opts) ->
     ?ASYNC_NIF_CALL(fun destroy_int/3, [Name, Opts]).
 
-destroy_int(_Ref, _Name, _Opts) ->
+-spec destroy_nif(reference(), string(), open_options()) -> ok | {error, any()}.
+destroy_nif(_Ref, _Name, _Opts) ->
     erlang:nif_error({erlang, not_loaded}).
 
+-spec repair(string(), repair_options()) -> ok | {error, any()}.
 repair(Name, Opts) ->
     ?ASYNC_NIF_CALL(fun repair_int/3, [Name, Opts]).
 
-repair_int(_Ref, _Name, _Opts) ->
+-spec repair_nif(reference(), string(), repair_options()) -> ok | {error, any()}.
+repair_nif(_Ref, _Name, _Opts) ->
     erlang:nif_error({erlang, not_loaded}).
 
 -spec is_empty(db_ref()) -> boolean().
 is_empty(DbRef) ->
     ?ASYNC_NIF_CALL(fun is_empty_int/2, [DbRef]).
 
-is_empty_int(_Ref, _DbRef) ->
+-spec is_empty_nif(reference(), db_ref()) -> boolean().
+is_empty_nif(_Ref, _DbRef) ->
     erlang:nif_error({error, not_loaded}).
 
--spec option_types(open | read | write) -> [{atom(), bool | integer | any}].
 option_types(open) ->
     [{create_if_missing, bool},
      {error_if_exists, bool},
@@ -264,6 +269,7 @@ validate_options(Type, Opts) ->
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
+
 do_fold(Itr, Fun, Acc0, Opts) ->
     try
         %% Extract {first_key, binary()} and seek to that key as a starting
