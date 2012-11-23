@@ -162,16 +162,10 @@ get_nif(_Ref, _DbRef, _Key, _Opts) ->
 
 -spec put(db_ref(), binary(), binary(), write_options()) -> ok | {error, any()}.
 put(DbRef, Key, Value, Opts) ->
-    put_int(DbRef, Key, Value, Opts).
-
-put_int(DbRef, Key, Value, Opts) ->
     write(DbRef, [{put, Key, Value}], Opts).
 
 -spec delete(db_ref(), binary(), write_options()) -> ok | {error, any()}.
 delete(DbRef, Key, Opts) ->
-    delete_int(DbRef, Key, Opts).
-
-delete_int(DbRef, Key, Opts) ->
     write(DbRef, [{delete, Key}], Opts).
 
 -spec write(db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
