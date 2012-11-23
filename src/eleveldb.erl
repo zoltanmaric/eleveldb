@@ -113,21 +113,22 @@ init() ->
 open(Name, Opts) ->
     ?ASYNC_NIF_CALL(fun open_int/3, [Name, Opts]).
 
-open_int(_Ref, _Name, _Opts) ->
+open_nif(_Ref, _Name, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec close(db_ref()) -> ok | {error, any()}.
 close(DbRef) ->
     ?ASYNC_NIF_CALL(fun close_int/2, [DbRef]).
 
-close_int(_Ref, _DbRef) ->
+
+close_nif(_Ref, _DbRef) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec get(db_ref(), binary(), read_options()) -> {ok, binary()} | not_found | {error, any()}.
 get(DbRef, Key, Opts) ->
     ?ASYNC_NIF_CALL(fun get_int/4, [DbRef, Key, Opts]).
 
-get_int(_Ref, _DbRef, _Key, _Opts) ->
+get_nif(_Ref, _DbRef, _Key, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec put(db_ref(), binary(), binary(), write_options()) -> ok | {error, any()}.
@@ -148,21 +149,23 @@ delete_int(DbRef, Key, Opts) ->
 write(DbRef, Updates, Opts) ->
     ?ASYNC_NIF_CALL(fun write_int/4, [DbRef, Updates, Opts]).
 
-write_int(_Ref, _DbRef, _Updates, _Opts) ->
+
+write_nif(_Ref, _DbRef, _Updates, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator(db_ref(), read_options()) -> {ok, itr_ref()}.
 iterator(DbRef, Opts) ->
     ?ASYNC_NIF_CALL(fun iterator_int/3, [DbRef, Opts]).
 
-iterator_int(_Ref, _DbRef, _Opts) ->
+
+iterator_nif(_Ref, _DbRef, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator(db_ref(), read_options(), keys_only) -> {ok, itr_ref()}.
 iterator(DbRef, Opts, keys_only) ->
     ?ASYNC_NIF_CALL(fun iterator_int/4, [DbRef, Opts, keys_only]).
 
-iterator_int(_Ref, _DbRef, _Opts, keys_only) ->
+iterator_nif(_Ref, _DbRef, _Opts, keys_only) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator_move(itr_ref(), iterator_action()) -> {ok, Key::binary(), Value::binary()} |
@@ -172,7 +175,7 @@ iterator_int(_Ref, _DbRef, _Opts, keys_only) ->
 iterator_move(IRef, Loc) ->
     ?ASYNC_NIF_CALL(fun iterator_move_int/3, [IRef, Loc]).
 
-iterator_move_int(_Ref, _IRef, _Loc) ->
+iterator_move_nif(_Ref, _IRef, _Loc) ->
     erlang:nif_error({error, not_loaded}).
 
 
@@ -180,7 +183,7 @@ iterator_move_int(_Ref, _IRef, _Loc) ->
 iterator_close(IRef) ->
     ?ASYNC_NIF_CALL(fun iterator_close_int/2, [IRef]).
 
-iterator_close_int(_Ref, _IRef) ->
+iterator_close_nif(_Ref, _IRef) ->
     erlang:nif_error({error, not_loaded}).
 
 -type fold_fun() :: fun(({Key::binary(), Value::binary()}, any()) -> any()).

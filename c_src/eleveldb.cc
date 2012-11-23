@@ -947,18 +947,18 @@ static int on_upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, ER
 
 static ErlNifFunc nif_funcs[] =
 {
-    {"open_int", 3, eleveldb_open},
-    {"close_int", 2, eleveldb_close},
-    {"get_int", 4, eleveldb_get},
-    {"write_int", 4, eleveldb_write},
-    {"iterator_int", 3, eleveldb_iterator},
-    {"iterator_int", 4, eleveldb_iterator},
-    {"iterator_move_int", 3, eleveldb_iterator_move},
-    {"iterator_close_int", 2, eleveldb_iterator_close},
-    {"status_int", 3, eleveldb_status},
-    {"destroy_int", 3, eleveldb_destroy},
-    {"repair_int", 3, eleveldb_repair},
-    {"is_empty_int", 2, eleveldb_is_empty},
+    {"open_nif", 3, eleveldb_open},
+    {"close_nif", 2, eleveldb_close},
+    {"get_nif", 4, eleveldb_get},
+    {"write_nif", 4, eleveldb_write},
+    {"iterator_nif", 3, eleveldb_iterator},
+    {"iterator_nif", 4, eleveldb_iterator},
+    {"iterator_move_nif", 3, eleveldb_iterator_move},
+    {"iterator_close_nif", 2, eleveldb_iterator_close},
+    {"status_nif", 3, eleveldb_status},
+    {"destroy_nif", 3, eleveldb_destroy},
+    {"repair_nif", 3, eleveldb_repair},
+    {"is_empty_nif", 2, eleveldb_is_empty},
 };
 
 extern "C" {
