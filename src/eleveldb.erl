@@ -120,7 +120,7 @@ open(Name, Opts) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -136,7 +136,7 @@ close(DbRef) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -153,7 +153,7 @@ get(DbRef, Key, Opts) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -177,7 +177,7 @@ write(DbRef, Updates, Opts) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -194,7 +194,7 @@ iterator(DbRef, Opts) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -211,7 +211,7 @@ iterator(DbRef, Opts, keys_only) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -230,7 +230,7 @@ iterator_move(IRef, Loc) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -247,7 +247,7 @@ iterator_close(IRef) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -282,7 +282,7 @@ status(DbRef, Key) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -298,7 +298,7 @@ destroy(Name, Opts) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -315,7 +315,7 @@ repair(Name, Opts) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
@@ -332,7 +332,7 @@ is_empty(DbRef) ->
         {error, _Reason}=Error ->
             %% Work unit returned an error.
             Error;
-        {ok, Result} ->
+        _ = Result ->
             Result
     end.
 
