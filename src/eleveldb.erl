@@ -52,20 +52,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--define(ASYNC_NIF_CALL(Fun, Args),
-        begin
-            NIFRef = erlang:make_ref(),
-            case erlang:apply(Fun, [NIFRef|Args]) of
-                {ok, Metric} ->
-                    erlang:bump_reductions(Metric),
-                    receive
-                        {NIFRef, Reply} ->
-                            Reply
-                    end;
-                Other -> Other
-            end
-        end).
-
+-include("async_nif.hrl").
 
 -spec init() -> ok | {error, any()}.
 init() ->
