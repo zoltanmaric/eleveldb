@@ -20,8 +20,11 @@
 %%
 %% -------------------------------------------------------------------
 -module(eleveldb).
+-compile(export_all).
 
 -export([open/2,
+         spawn_native/0,
+         send_native/2,
          close/1,
          get/3,
          put/4,
@@ -51,6 +54,24 @@
 -endif.
 -include_lib("eunit/include/eunit.hrl").
 -endif.
+
+call_nif(Cmd, Args) ->
+    %% Need fast way to enable/disable. Checking app vars isn't fast.
+    Async = true,
+    case Async of
+        true ->
+            NP = eleveldb_thread_pool:worker(),
+            Ref = make_ref(),
+            %% NP ! {dispatch, Ref, self(), Cmd, Args},
+            NP ! {dbg_dispatch, Ref, self(), Cmd, Args},
+            receive
+                {Ref, Result} ->
+                    io:format("Received: ~p~n", [Result]),
+                    Result
+            end;
+        false ->
+            erlang:apply(?MODULE, Cmd, Args)
+    end.
 
 -spec init() -> ok | {error, any()}.
 init() ->
@@ -94,10 +115,22 @@ init() ->
 
 -opaque itr_ref() :: binary().
 
+spawn_native() ->
+    erlang:nif_error({error, not_loaded}).
+
+send_native(_Ref, _Mail) ->
+    erlang:nif_error({error, not_loaded}).
+
 -spec open(string(), open_options()) -> {ok, db_ref()} | {error, any()}.
 open(Name, Opts) ->
+    case whereis(eleveldb_thread_pool) of
+        undefined ->
+            eleveldb_thread_pool:start();
+        _ ->
+            ok
+    end,
     eleveldb_bump:big(),
-    open_int(Name, Opts).
+    call_nif(open_int, [Name, Opts]).
 
 open_int(_Name, _Opts) ->
     erlang:nif_error({error, not_loaded}).
@@ -105,7 +138,7 @@ open_int(_Name, _Opts) ->
 -spec close(db_ref()) -> ok | {error, any()}.
 close(Ref) ->
     eleveldb_bump:big(),
-    close_int(Ref).
+    call_nif(close_int, [Ref]).
 
 close_int(_Ref) ->
     erlang:nif_error({error, not_loaded}).
@@ -113,7 +146,7 @@ close_int(_Ref) ->
 -spec get(db_ref(), binary(), read_options()) -> {ok, binary()} | not_found | {error, any()}.
 get(Ref, Key, Opts) ->
     eleveldb_bump:big(),
-    get_int(Ref, Key, Opts).
+    call_nif(get_int, [Ref, Key, Opts]).
 
 get_int(_Ref, _Key, _Opts) ->
     erlang:nif_error({error, not_loaded}).
@@ -137,7 +170,7 @@ delete_int(Ref, Key, Opts) ->
 -spec write(db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
 write(Ref, Updates, Opts) ->
     eleveldb_bump:big(),
-    write_int(Ref, Updates, Opts).
+    call_nif(write_int, [Ref, Updates, Opts]).
 
 write_int(_Ref, _Updates, _Opts) ->
     erlang:nif_error({error, not_loaded}).
@@ -145,7 +178,7 @@ write_int(_Ref, _Updates, _Opts) ->
 -spec iterator(db_ref(), read_options()) -> {ok, itr_ref()}.
 iterator(Ref, Opts) ->
     eleveldb_bump:small(),
-    iterator_int(Ref, Opts).
+    call_nif(iterator_int2, [Ref, Opts]).
 
 iterator_int(_Ref, _Opts) ->
     erlang:nif_error({error, not_loaded}).
@@ -153,7 +186,7 @@ iterator_int(_Ref, _Opts) ->
 -spec iterator(db_ref(), read_options(), keys_only) -> {ok, itr_ref()}.
 iterator(Ref, Opts, keys_only) ->
     eleveldb_bump:small(),
-    iterator_int(Ref, Opts, keys_only).
+    call_nif(iterator_int3, [Ref, Opts, keys_only]).
 
 iterator_int(_Ref, _Opts, keys_only) ->
     erlang:nif_error({error, not_loaded}).
@@ -164,7 +197,7 @@ iterator_int(_Ref, _Opts, keys_only) ->
                                                      {error, iterator_closed}.
 iterator_move(IRef, Loc) ->
     eleveldb_bump:big(),
-    iterator_move_int(IRef, Loc).
+    call_nif(iterator_move_int, [IRef, Loc]).
 
 iterator_move_int(_IRef, _Loc) ->
     erlang:nif_error({error, not_loaded}).
@@ -173,7 +206,7 @@ iterator_move_int(_IRef, _Loc) ->
 -spec iterator_close(itr_ref()) -> ok.
 iterator_close(IRef) ->
     eleveldb_bump:small(),
-    iterator_close_int(IRef).
+    call_nif(iterator_close_int, [IRef]).
 
 iterator_close_int(_IRef) ->
     erlang:nif_error({error, not_loaded}).
@@ -199,7 +232,7 @@ fold_keys(Ref, Fun, Acc0, Opts) ->
 -spec status(db_ref(), Key::binary()) -> {ok, binary()} | error.
 status(Ref, Key) ->
     eleveldb_bump:small(),
-    status_int(Ref, Key).
+    call_nif(status_int, [Ref, Key]).
 
 status_int(_Ref, _Key) ->
     erlang:nif_error({error, not_loaded}).
@@ -207,14 +240,14 @@ status_int(_Ref, _Key) ->
 -spec destroy(string(), open_options()) -> ok | {error, any()}.
 destroy(Name, Opts) ->
     eleveldb_bump:big(),
-    destroy_int(Name, Opts).
+    call_nif(destroy_int, [Name, Opts]).
 
 destroy_int(_Name, _Opts) ->
     erlang:nif_error({erlang, not_loaded}).
 
 repair(Name, Opts) ->
     eleveldb_bump:big(),
-    repair_int(Name, Opts).
+    call_nif(repair_int, [Name, Opts]).
 
 repair_int(_Name, _Opts) ->
     erlang:nif_error({erlang, not_loaded}).
@@ -222,7 +255,7 @@ repair_int(_Name, _Opts) ->
 -spec is_empty(db_ref()) -> boolean().
 is_empty(Ref) ->
     eleveldb_bump:big(),
-    is_empty_int(Ref).
+    call_nif(is_empty_int, [Ref]).
 
 is_empty_int(_Ref) ->
     erlang:nif_error({error, not_loaded}).
@@ -381,7 +414,7 @@ close_fold_test() ->
     {ok, Ref} = open("/tmp/eleveldb.close_fold.test", [{create_if_missing, true}]),
     ok = eleveldb:put(Ref, <<"k">>,<<"v">>,[]),
     ?assertException(throw, {iterator_closed, ok}, % ok is returned by close as the acc
-                     eleveldb:fold(Ref, fun(_,A) -> eleveldb:close(Ref) end, undefined, [])).
+                     eleveldb:fold(Ref, fun(_,_A) -> eleveldb:close(Ref) end, undefined, [])).
 
 -ifdef(EQC).
 

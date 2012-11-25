@@ -38,6 +38,18 @@ cacheleak_test_() ->
 compressible_bytes(Count) ->
     list_to_binary([0 || _I <- lists:seq(1, Count)]).
 
+%% Until LevelDB ref is GC'd, lock isn't released. Retry until successful.
+open() ->
+    case eleveldb:open("/tmp/eleveldb.cacheleak.test",
+                       [{create_if_missing, true},
+                        {cache_size, 83886080}]) of
+        {ok, Ref} ->
+            Ref;
+        _ ->
+            receive after 500 -> ok end,
+            open()
+    end.
+   
 cacheleak_loop(0, _Blobs, _MaxFinalRSS) ->
     ok;
 cacheleak_loop(Count, Blobs, MaxFinalRSS) ->
@@ -47,9 +59,7 @@ cacheleak_loop(Count, Blobs, MaxFinalRSS) ->
     %% process to make sure everything got cleaned up as expected.
     F = fun() ->
 
-                {ok, Ref} = eleveldb:open("/tmp/eleveldb.cacheleak.test",
-                                          [{create_if_missing, true},
-                                           {cache_size, 83886080}]),
+                Ref = open(),
                 [ok = eleveldb:put(Ref, I, B, []) || {I, B} <- Blobs],
                 eleveldb:fold(Ref, fun({_K, _V}, A) -> A end, [], [{fill_cache, true}]),
                 [{ok, B} = eleveldb:get(Ref, I, []) || {I, B} <- Blobs],

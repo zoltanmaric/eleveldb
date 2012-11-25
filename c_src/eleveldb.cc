@@ -20,6 +20,7 @@
 //
 // -------------------------------------------------------------------
 #include "eleveldb.h"
+#include "native_dispatch.h"
 
 #include "leveldb/db.h"
 #include "leveldb/comparator.h"
@@ -106,6 +107,7 @@ static ErlNifFunc nif_funcs[] =
     {"destroy_int", 2, eleveldb_destroy},
     {"repair_int", 2, eleveldb_repair},
     {"is_empty_int", 1, eleveldb_is_empty},
+    NATIVE_PROCESS_NIFS
 };
 
 ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Options& opts)
@@ -855,9 +857,13 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     ATOM(ATOM_KEYS_ONLY, "keys_only");
     ATOM(ATOM_COMPRESSION, "compression");
     ATOM(ATOM_USE_BLOOMFILTER, "use_bloomfilter");
+    setup_native_dispatch(env, priv_data, load_info);
     return 0;
 }
 
 extern "C" {
     ERL_NIF_INIT(eleveldb, nif_funcs, &on_load, NULL, NULL, NULL);
 }
+
+// Native dispatch
+NATIVE_DISPATCH_TABLE(nif_funcs);
