@@ -62,11 +62,11 @@ call_nif(Cmd, Args) ->
         true ->
             NP = eleveldb_thread_pool:worker(),
             Ref = make_ref(),
-            %% NP ! {dispatch, Ref, self(), Cmd, Args},
-            NP ! {dbg_dispatch, Ref, self(), Cmd, Args},
+            NP ! {dispatch, Ref, self(), Cmd, Args},
+            %% NP ! {dbg_dispatch, Ref, self(), Cmd, Args},
             receive
                 {Ref, Result} ->
-                    io:format("Received: ~p~n", [Result]),
+                    %% io:format("Received: ~p~n", [Result]),
                     Result
             end;
         false ->
@@ -178,7 +178,7 @@ write_int(_Ref, _Updates, _Opts) ->
 -spec iterator(db_ref(), read_options()) -> {ok, itr_ref()}.
 iterator(Ref, Opts) ->
     eleveldb_bump:small(),
-    call_nif(iterator_int2, [Ref, Opts]).
+    call_nif(iterator_int, [Ref, Opts]).
 
 iterator_int(_Ref, _Opts) ->
     erlang:nif_error({error, not_loaded}).
@@ -186,7 +186,7 @@ iterator_int(_Ref, _Opts) ->
 -spec iterator(db_ref(), read_options(), keys_only) -> {ok, itr_ref()}.
 iterator(Ref, Opts, keys_only) ->
     eleveldb_bump:small(),
-    call_nif(iterator_int3, [Ref, Opts, keys_only]).
+    call_nif(iterator_int, [Ref, Opts, keys_only]).
 
 iterator_int(_Ref, _Opts, keys_only) ->
     erlang:nif_error({error, not_loaded}).

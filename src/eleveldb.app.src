@@ -5,8 +5,7 @@
   {registered, []},
   {applications, [
                   kernel,
-                  stdlib,
-                  native_process
+                  stdlib
                  ]},
   {env, [
          %% Max file handles to keep open by default
