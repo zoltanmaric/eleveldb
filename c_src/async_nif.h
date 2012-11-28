@@ -45,9 +45,9 @@ extern "C" {
 #include "queue.h"
 
 struct async_nif_req_entry {
-  ERL_NIF_TERM pid;
-  ErlNifEnv *env;
   ERL_NIF_TERM ref, *argv;
+  ErlNifEnv *env;
+  ErlNifPid pid;
   void *args;
   void *priv_data;
   void (*fn_work)(ErlNifEnv*, ERL_NIF_TERM, void *, ErlNifPid*, void *);
@@ -77,70 +77,43 @@ static struct async_nif_worker_entry async_nif_worker_entries[ASYNC_NIF_MAX_WORK
   static void fn_post_ ## decl (struct decl ## _args *args) {           \
     do post_block while(0);                                             \
   }                                                                     \
-  static ERL_NIF_TERM decl(ErlNifEnv* env_in, int argc_in, const ERL_NIF_TERM argv_in[]) { \
+  static ERL_NIF_TERM decl(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv_in[]) { \
     struct decl ## _args on_stack_args;                                 \
     struct decl ## _args *args = &on_stack_args;                        \
     struct decl ## _args *copy_of_args;                                 \
     struct async_nif_req_entry *req = NULL;                             \
-    ErlNifPid pid_in;                                                   \
-    ErlNifEnv *env = NULL;                                              \
-    ERL_NIF_TERM ref;                                                   \
-    ERL_NIF_TERM *argv = NULL;                                          \
-    int __i = 0, argc = argc_in - 1;                                    \
-    enif_self(env_in, &pid_in);                                         \
+    ErlNifEnv *new_env = NULL;                                          \
+    /* argv[0] is used internally for selective recv. */                \
+    const ERL_NIF_TERM *argv = argv_in + 1;                             \
+    argc--;                                                             \
     if (async_nif_shutdown)                                             \
-      return enif_make_tuple2(env_in, enif_make_atom(env_in, "error"),  \
-                              enif_make_atom(env_in, "shutdown"));      \
-    env = enif_alloc_env();                                             \
-    if (!env)                                                           \
-      return enif_make_tuple2(env_in, enif_make_atom(env_in, "error"),  \
-                              enif_make_atom(env_in, "enomem"));        \
-    ref = enif_make_copy(env, argv_in[0]);                              \
-    if (!ref) {                                                         \
-      enif_free_env(env);                                               \
-      return enif_make_tuple2(env_in, enif_make_atom(env_in, "error"),  \
-                              enif_make_atom(env_in, "enomem"));        \
+      return enif_make_tuple2(env, enif_make_atom(env, "error"),        \
+                              enif_make_atom(env, "shutdown"));         \
+    if (!(new_env = enif_alloc_env())) {                                \
+      return enif_make_tuple2(env, enif_make_atom(env, "error"),        \
+                              enif_make_atom(env, "enomem"));           \
+    }                                                                   \
+    do pre_block while(0);                                              \
+    req = (struct async_nif_req_entry*)enif_alloc(sizeof(struct async_nif_req_entry)); \
+    if (!req) {                                                         \
+      fn_post_ ## decl (args);                                          \
+      enif_free_env(new_env);                                           \
+      return enif_make_tuple2(env, enif_make_atom(env, "error"),        \
+                              enif_make_atom(env, "enomem"));           \
     }                                                                   \
     copy_of_args = (struct decl ## _args *)enif_alloc(sizeof(struct decl ## _args)); \
     if (!copy_of_args) {                                                \
-      enif_free_env(env);                                               \
-      return enif_make_tuple2(env_in, enif_make_atom(env_in, "error"),  \
-                              enif_make_atom(env_in, "enomem"));        \
+      fn_post_ ## decl (args);                                          \
+      enif_free_env(new_env);                                           \
+      return enif_make_tuple2(env, enif_make_atom(env, "error"),        \
+                              enif_make_atom(env, "enomem"));           \
     }                                                                   \
-    argv = (ERL_NIF_TERM *)enif_alloc((sizeof(ERL_NIF_TERM) * argc));   \
-    if (!argv) {                                                        \
-      enif_free(copy_of_args);                                          \
-      enif_free_env(env);                                               \
-      return enif_make_tuple2(env_in, enif_make_atom(env_in, "error"),  \
-                              enif_make_atom(env_in, "enomem"));        \
-    }                                                                   \
-    req = (struct async_nif_req_entry*)enif_alloc(sizeof(struct async_nif_req_entry)); \
-    if (!req) {                                                         \
-      enif_free(argv);                                                  \
-      enif_free(copy_of_args);                                          \
-      enif_free_env(env);                                               \
-      return enif_make_tuple2(env_in, enif_make_atom(env_in, "error"),  \
-                              enif_make_atom(env_in, "enomem"));        \
-    }                                                                   \
-    for (__i = 0; __i < argc; __i++) {                                  \
-      argv[__i] = enif_make_copy(env, argv_in[(__i + 1)]);              \
-      if (!argv[__i]) {                                                 \
-        enif_free(req);                                                 \
-        enif_free(argv);                                                \
-        enif_free(copy_of_args);                                        \
-        enif_free_env(env);                                             \
-        return enif_make_tuple2(env_in, enif_make_atom(env_in, "error"), \
-                                enif_make_atom(env_in, "enomem"));      \
-      }                                                                 \
-    }                                                                   \
-    do pre_block while(0);                                              \
     memcpy(copy_of_args, args, sizeof(struct decl ## _args));           \
-    req->ref = ref;                                                     \
-    req->pid = enif_make_pid(env, &pid_in);                             \
+    req->env = new_env;                                                 \
+    req->ref = enif_make_copy(new_env, argv_in[0]);                     \
+    enif_self(env, &req->pid);                                          \
     req->args = (void*)copy_of_args;                                    \
-    req->argv = argv;                                                   \
-    req->env = env;                                                     \
-    req->priv_data = enif_priv_data(env_in);                            \
+    req->priv_data = enif_priv_data(env);                               \
     req->fn_work = (void (*)(ErlNifEnv *, ERL_NIF_TERM, void*, ErlNifPid*, void *))fn_work_ ## decl ; \
     req->fn_post = (void (*)(void *))fn_post_ ## decl;                  \
     async_nif_enqueue_req(req);                                         \
@@ -153,19 +126,17 @@ static struct async_nif_worker_entry async_nif_worker_entries[ASYNC_NIF_MAX_WORK
 #define ASYNC_NIF_UNLOAD() async_nif_unload();
 #define ASYNC_NIF_UPGRADE() async_nif_unload();
 
-#define ASYNC_NIF_PRE_ENV() env_in
-#define ASYNC_NIF_PRE_RETURN_CLEANUP()          \
-  enif_free(argv);                              \
-  enif_free(copy_of_args);                      \
-  enif_free(req);                               \
-  enif_free_env(env);
-#define ASYNC_NIF_RETURN_BADARG() ASYNC_NIF_PRE_RETURN_CLEANUP(); return enif_make_badarg(env_in);
+#define ASYNC_NIF_RETURN_BADARG() return enif_make_badarg(env);
 
 #ifndef PULSE
 #define ASYNC_NIF_REPLY(msg) enif_send(NULL, pid, env, enif_make_tuple2(env, ref, msg))
 #else
 #define ASYNC_NIF_REPLY(msg) PULSE_SEND(NULL, pid, env, enif_make_tuple2(env, ref, msg))
 #endif
+
+#define ASYNC_NIF_KEEP_BINARY(_term_, _bin_) \
+  enif_make_copy(new_env, _term_);                  \
+  enif_inspect_binary(env, _term_, &(_bin_));
 
 static void async_nif_enqueue_req(struct async_nif_req_entry *r)
 {
@@ -215,12 +186,9 @@ static void *async_nif_worker_fn(void *arg)
       enif_mutex_unlock(async_nif_req_mutex);
 
       /* Finally, let's do the work! :) */
-      ErlNifPid pid;
-      enif_get_local_pid(req->env, req->pid, &pid);
-      req->fn_work(req->env, req->ref, req->priv_data, &pid, req->args);
+      req->fn_work(req->env, req->ref, req->priv_data, &req->pid, req->args);
       req->fn_post(req->args);
       enif_free(req->args);
-      enif_free(req->argv);
       enif_free_env(req->env);
       enif_free(req);
     }
@@ -254,37 +222,31 @@ static void async_nif_unload(void)
   STAILQ_FOREACH(req, &async_nif_reqs, entries) {
     STAILQ_REMOVE(&async_nif_reqs, STAILQ_LAST(&async_nif_reqs, async_nif_req_entry, entries),
                   async_nif_req_entry, entries);
-    ErlNifPid pid;
-    enif_get_local_pid(req->env, req->pid, &pid);
 #ifdef PULSE
-    PULSE_SEND(NULL, &pid, req->env,
-              enif_make_tuple2(req->env, enif_make_atom(req->env, "error"),
+    PULSE_SEND(NULL, &req->pid, req->env,
+              enif_make_tuple2(env, enif_make_atom(req->env, "error"),
                                enif_make_atom(req->env, "shutdown")));
 #else
-    enif_send(NULL, &pid, req->env,
+    enif_send(NULL, &req->pid, req->env,
               enif_make_tuple2(req->env, enif_make_atom(req->env, "error"),
                                enif_make_atom(req->env, "shutdown")));
 #endif
     req->fn_post(req->args);
     enif_free(req->args);
-    enif_free(req->argv);
-    enif_free_env(req->env);
     enif_free(req);
     async_nif_req_count--;
   }
   enif_mutex_unlock(async_nif_req_mutex);
 
-  enif_cond_destroy(async_nif_cnd);
-  /* Not strictly necessary. */
   memset(async_nif_worker_entries, sizeof(struct async_nif_worker_entry) * ASYNC_NIF_MAX_WORKERS, 0);
-
+  enif_cond_destroy(async_nif_cnd); async_nif_cnd = NULL;
   enif_mutex_destroy(async_nif_req_mutex); async_nif_req_mutex = NULL;
   enif_mutex_destroy(async_nif_worker_mutex); async_nif_worker_mutex = NULL;
 }
 
 static int async_nif_init(void)
 {
-  unsigned int i;
+  int i;
 
   /* Don't init more than once. */
   if (async_nif_req_mutex) return 0;
@@ -298,9 +260,24 @@ static int async_nif_init(void)
 
   /* Setup the thread pool management. */
   enif_mutex_lock(async_nif_worker_mutex);
+  memset(async_nif_worker_entries, sizeof(struct async_nif_worker_entry) * ASYNC_NIF_MAX_WORKERS, 0);
+
   for (i = 0; i < ASYNC_NIF_MAX_WORKERS; i++) {
-    enif_thread_create(NULL, &async_nif_worker_entries[i].tid,
-                       &async_nif_worker_fn, (void*)&async_nif_worker_entries[i], NULL);
+    if (enif_thread_create(NULL, &async_nif_worker_entries[i].tid,
+                            &async_nif_worker_fn, (void*)&async_nif_worker_entries[i], NULL) != 0) {
+      async_nif_shutdown = 1;
+      enif_cond_broadcast(async_nif_cnd);
+      enif_mutex_unlock(async_nif_worker_mutex);
+      while(i-- > 0) {
+        void *exit_value = 0; /* Ignore this. */
+        enif_thread_join(async_nif_worker_entries[i].tid, &exit_value);
+      }
+      memset(async_nif_worker_entries, sizeof(struct async_nif_worker_entry) * ASYNC_NIF_MAX_WORKERS, 0);
+      enif_cond_destroy(async_nif_cnd); async_nif_cnd = NULL;
+      enif_mutex_destroy(async_nif_req_mutex); async_nif_req_mutex = NULL;
+      enif_mutex_destroy(async_nif_worker_mutex); async_nif_worker_mutex = NULL;
+      return -1;
+    }
   }
   enif_mutex_unlock(async_nif_worker_mutex);
   return 0;
