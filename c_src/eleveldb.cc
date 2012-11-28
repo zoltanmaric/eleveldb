@@ -97,7 +97,7 @@ static ERL_NIF_TERM ATOM_COMPRESSION;
 static ERL_NIF_TERM ATOM_ERROR_DB_REPAIR;
 static ERL_NIF_TERM ATOM_USE_BLOOMFILTER;
 
-ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM item, leveldb::Options& opts)
+ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Options& opts)
 {
     int arity;
     const ERL_NIF_TERM* option;
@@ -173,7 +173,7 @@ ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM 
     return ATOM_OK;
 }
 
-ERL_NIF_TERM parse_read_option(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM item, leveldb::ReadOptions& opts)
+ERL_NIF_TERM parse_read_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::ReadOptions& opts)
 {
     int arity;
     const ERL_NIF_TERM* option;
@@ -188,7 +188,7 @@ ERL_NIF_TERM parse_read_option(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM 
     return ATOM_OK;
 }
 
-ERL_NIF_TERM parse_write_option(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM item, leveldb::WriteOptions& opts)
+ERL_NIF_TERM parse_write_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::WriteOptions& opts)
 {
     int arity;
     const ERL_NIF_TERM* option;
@@ -201,7 +201,7 @@ ERL_NIF_TERM parse_write_option(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM
     return ATOM_OK;
 }
 
-ERL_NIF_TERM write_batch_item(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM item, leveldb::WriteBatch& batch)
+ERL_NIF_TERM write_batch_item(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::WriteBatch& batch)
 {
     int arity;
     const ERL_NIF_TERM* action;
@@ -238,14 +238,14 @@ ERL_NIF_TERM write_batch_item(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM i
     return item;
 }
 
-template <typename Acc> ERL_NIF_TERM fold(ErlNifEnv* env, ErlNifEnv* new_env, ERL_NIF_TERM list,
-                                          ERL_NIF_TERM(*fun)(ErlNifEnv*, ErlNifEnv *, ERL_NIF_TERM, Acc&),
+template <typename Acc> ERL_NIF_TERM fold(ErlNifEnv* env, ERL_NIF_TERM list,
+                                          ERL_NIF_TERM(*fun)(ErlNifEnv*, ERL_NIF_TERM, Acc&),
                                           Acc& acc)
 {
     ERL_NIF_TERM head, tail = list;
     while (enif_get_list_cell(env, tail, &head, &tail))
     {
-        ERL_NIF_TERM result = fun(env, new_env, head, acc);
+        ERL_NIF_TERM result = fun(env, head, acc);
         if (result != ATOM_OK)
         {
             return result;
@@ -329,7 +329,7 @@ ASYNC_NIF_DECL(eleveldb_open,
     }
 
     // Parse out the options
-    ERL_NIF_TERM result = fold(env, new_env, argv[1], parse_open_option, args->opts);
+    ERL_NIF_TERM result = fold(env, argv[1], parse_open_option, args->opts);
     if (result != ATOM_OK) {
       return enif_make_tuple2(env, ATOM_ERROR, result);
     }
@@ -397,7 +397,7 @@ ASYNC_NIF_DECL(eleveldb_get,
 
    eleveldb_db_handle* db_handle;
    leveldb::ReadOptions opts;
-   ErlNifBinary key;
+   ERL_NIF_TERM key;
  },
  { // pre
 
@@ -407,25 +407,29 @@ ASYNC_NIF_DECL(eleveldb_get,
      ASYNC_NIF_RETURN_BADARG();
    }
 
+   args->key = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
    // Parse out the read options
-   ERL_NIF_TERM result = fold(env, new_env, argv[2], parse_read_option, args->opts);
+   ERL_NIF_TERM result = fold(env, argv[2], parse_read_option, args->opts);
    if (result != ATOM_OK)
      return enif_make_tuple2(env, ATOM_ERROR, result);
- 
-   ASYNC_NIF_KEEP_BINARY(argv[1], args->key);
 
    // Retain the handle
    enif_keep_resource(args->db_handle);
  },
  { // work
 
+   ErlNifBinary key;
+   if (!enif_inspect_binary(env, args->key, &key)) {
+     ASYNC_NIF_REPLY(enif_make_badarg(env));
+     return;
+   }
    enif_mutex_lock(args->db_handle->db_lock);
    if (args->db_handle->db == NULL) {
      enif_mutex_unlock(args->db_handle->db_lock);
      ASYNC_NIF_REPLY(enif_make_tuple2(env, ATOM_ERROR, ATOM_EINVAL));
     } else {
        leveldb::DB* db = args->db_handle->db;
-       leveldb::Slice key_slice((const char*)args->key.data, args->key.size);
+       leveldb::Slice key_slice((const char*)key.data, key.size);
        std::string sval;
        leveldb::Status status = db->Get(args->opts, key_slice, &sval);
        if (status.ok()) {
@@ -458,6 +462,7 @@ ASYNC_NIF_DECL(eleveldb_write,
    eleveldb_db_handle* db_handle;
    leveldb::WriteOptions opts;
    leveldb::WriteBatch batch;
+   ERL_NIF_TERM item;
  },
  { // pre
 
@@ -470,12 +475,13 @@ ASYNC_NIF_DECL(eleveldb_write,
    }
 
    // Parse out the write options
-   if ((result = fold(env, new_env, argv[2], parse_write_option, args->opts)) != ATOM_OK) {
+   if ((result = fold(env, argv[2], parse_write_option, args->opts)) != ATOM_OK) {
      return enif_make_tuple2(env, ATOM_ERROR, result);
    }
 
    // Traverse actions and build a write batch
-   if ((result = fold(env, new_env, argv[1], write_batch_item, args->batch)) != ATOM_OK) {
+   args->item = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
+   if ((result = fold(ASYNC_NIF_WORK_ENV, args->item, write_batch_item, args->batch)) != ATOM_OK) {
      return enif_make_tuple2(env, ATOM_ERROR,
                              enif_make_tuple2(env, ATOM_BAD_WRITE_ACTION, result));
    }
@@ -522,7 +528,7 @@ ASYNC_NIF_DECL(eleveldb_iterator,
    }
 
    // Parse out the read options
-   fold(env, new_env, argv[1], parse_read_option, args->opts);
+   fold(env, argv[1], parse_read_option, args->opts);
 
    // Check for keys_only iterator flag
    args->keys_only = ((argc == 3) && (argv[2] == ATOM_KEYS_ONLY));
@@ -585,7 +591,7 @@ ASYNC_NIF_DECL(eleveldb_iterator_move,
 
     eleveldb_itr_handle* itr_handle;
     ERL_NIF_TERM op;
-    ErlNifBinary key;
+    ERL_NIF_TERM key;
  },
  { // pre
 
@@ -596,9 +602,9 @@ ASYNC_NIF_DECL(eleveldb_iterator_move,
    // Cursor operation or key<<>>
    args->op = 0;
    if (enif_is_binary(env, argv[1])) {
-     ASYNC_NIF_KEEP_BINARY(argv[1], args->key);
+     args->key = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
    } else if (enif_is_atom(env, argv[1])) {
-     args->op = argv[1];
+     args->op = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
    } else {
      ASYNC_NIF_RETURN_BADARG();
    }
@@ -627,7 +633,12 @@ ASYNC_NIF_DECL(eleveldb_iterator_move,
          itr->Prev();
         }
      } else {
-       leveldb::Slice key_slice((const char*)args->key.data, args->key.size);
+       ErlNifBinary key;
+       if (!enif_inspect_binary(env, args->key, &key)) {
+         ASYNC_NIF_REPLY(enif_make_badarg(env));
+         return;
+       }
+       leveldb::Slice key_slice((const char*)key.data, key.size);
        itr->Seek(key_slice);
      }
 
@@ -656,7 +667,7 @@ ASYNC_NIF_DECL(eleveldb_iterator_move,
 
 ASYNC_NIF_DECL(eleveldb_iterator_close,
  { // args struct
-   
+
    eleveldb_itr_handle* itr_handle;
  },
  { // pre
@@ -672,7 +683,7 @@ ASYNC_NIF_DECL(eleveldb_iterator_close,
 
    // Make sure locks are acquired in the same order to close/free_db
    // to avoid a deadlock.
-   
+
    enif_mutex_lock(args->itr_handle->db_handle->db_lock);
    enif_mutex_lock(args->itr_handle->itr_lock);
 
@@ -699,9 +710,9 @@ ASYNC_NIF_DECL(eleveldb_iterator_close,
 
 ASYNC_NIF_DECL(eleveldb_status,
  { // args struct
-   
+
    eleveldb_db_handle* db_handle;
-   ErlNifBinary name;
+   ERL_NIF_TERM item;
  },
  { // pre
 
@@ -709,19 +720,24 @@ ASYNC_NIF_DECL(eleveldb_status,
          enif_is_binary(env, argv[1]))) {
      ASYNC_NIF_RETURN_BADARG();
    }
-   ASYNC_NIF_KEEP_BINARY(argv[1], args->name);
+   args->item = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
 
    // Retain the handle
    enif_keep_resource(args->db_handle);
  },
  { // work
 
+   ErlNifBinary item;
+   if (!enif_inspect_binary(env, args->item, &item)) {
+     ASYNC_NIF_REPLY(enif_make_badarg(env));
+     return;
+   }
    enif_mutex_lock(args->db_handle->db_lock);
    if (args->db_handle->db == NULL) {
      enif_mutex_unlock(args->db_handle->db_lock);
      ASYNC_NIF_REPLY(enif_make_tuple2(env, ATOM_ERROR, ATOM_EINVAL));
    } else {
-     leveldb::Slice name((const char*)args->name.data, args->name.size);
+     leveldb::Slice name((const char*)item.data, item.size);
      std::string value;
      if (args->db_handle->db->GetProperty(name, &value)) {
        ERL_NIF_TERM result;
@@ -754,7 +770,7 @@ ASYNC_NIF_DECL(eleveldb_repair,
    }
 
    // Parse out the options
-   // fold(env, new_env, argv[1], parse_repair_option, opts);
+   // fold(env, argv[1], parse_repair_option, opts);
  },
  { // work
 
@@ -783,7 +799,7 @@ ASYNC_NIF_DECL(eleveldb_destroy,
    }
 
    // Parse out the options
-   fold(env, new_env, argv[1], parse_open_option, args->opts);
+   fold(env, argv[1], parse_open_option, args->opts);
  },
  { // work
 
@@ -925,7 +941,7 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     ATOM(ATOM_COMPRESSION, "compression");
     ATOM(ATOM_USE_BLOOMFILTER, "use_bloomfilter");
 
-    ASYNC_NIF_LOAD();
+    ASYNC_NIF_LOAD(64);
     return 0;
 }
 
