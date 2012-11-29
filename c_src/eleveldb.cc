@@ -205,36 +205,35 @@ ERL_NIF_TERM write_batch_item(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::WriteB
 {
     int arity;
     const ERL_NIF_TERM* action;
-    if (enif_get_tuple(env, item, &arity, &action) ||
-        enif_is_atom(env, item))
-    {
-        if (item == ATOM_CLEAR)
-        {
-            batch.Clear();
-            return ATOM_OK;
-        }
-        ErlNifBinary key, value;
 
-        if (action[0] == ATOM_PUT && arity == 3 &&
+    // Looking for one of: clear/0, put/2, delete/1
+    if (enif_is_atom(env, item) && item == ATOM_CLEAR) {
+      batch.Clear();
+      return ATOM_OK;
+    } else if (enif_get_tuple(env, item, &arity, &action)) {
+      ErlNifBinary key;
+      switch(arity) {
+      case 2:
+        if (action[0] == ATOM_DELETE &&
+            enif_inspect_binary(env, action[1], &key)) {
+          leveldb::Slice key_slice((const char*)key.data, key.size);
+          batch.Delete(key_slice);
+          return ATOM_OK;
+        }
+        break;
+      case 3:
+        ErlNifBinary value;
+        if (action[0] == ATOM_PUT &&
             enif_inspect_binary(env, action[1], &key) &&
-            enif_inspect_binary(env, action[2], &value))
-        {
+            enif_inspect_binary(env, action[2], &value)) {
             leveldb::Slice key_slice((const char*)key.data, key.size);
             leveldb::Slice value_slice((const char*)value.data, value.size);
             batch.Put(key_slice, value_slice);
             return ATOM_OK;
         }
-
-        if (action[0] == ATOM_DELETE && arity == 2 &&
-            enif_inspect_binary(env, action[1], &key))
-        {
-            leveldb::Slice key_slice((const char*)key.data, key.size);
-            batch.Delete(key_slice);
-            return ATOM_OK;
-        }
+        break;
+      }
     }
-
-    // Failed to match clear/put/delete; return the failing item
     return item;
 }
 
