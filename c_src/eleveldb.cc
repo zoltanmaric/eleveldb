@@ -317,7 +317,7 @@ ASYNC_NIF_DECL(eleveldb_open,
  { // args struct
 
     char filename[1024];
-    leveldb::Options opts;
+    ERL_NIF_TERM opts;
  },
  { // pre
 
@@ -326,20 +326,23 @@ ASYNC_NIF_DECL(eleveldb_open,
           && enif_is_list(env, argv[1]))) {
       ASYNC_NIF_RETURN_BADARG();
     }
-
-    // Parse out the options
-    ERL_NIF_TERM result = fold(env, argv[1], parse_open_option, args->opts);
-    if (result != ATOM_OK) {
-      return enif_make_tuple2(env, ATOM_ERROR, result);
-    }
+    args->opts = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
  },
  { // work
 
+    leveldb::Options opts;
+    ERL_NIF_TERM r;
+    if ((r = fold(env, args->opts, parse_open_option, opts)) != ATOM_OK) {
+      ASYNC_NIF_REPLY(enif_make_tuple2(env, ATOM_ERROR, r));
+      return;
+    }
+
    // Open the database
    leveldb::DB* db;
-   leveldb::Status status = leveldb::DB::Open(args->opts, args->filename, &db);
+   leveldb::Status status = leveldb::DB::Open(opts, args->filename, &db);
    if (!status.ok()) {
      ASYNC_NIF_REPLY(error_tuple(env, ATOM_ERROR_DB_OPEN, status));
+     return;
    }
 
    // Setup handle
@@ -349,7 +352,7 @@ ASYNC_NIF_DECL(eleveldb_open,
    memset(handle, '\0', sizeof(eleveldb_db_handle));
    handle->db = db;
    handle->db_lock = enif_mutex_create((char*)"eleveldb_db_lock");
-   handle->options = args->opts;
+   handle->options = opts;
    handle->iters = new std::set<struct eleveldb_itr_handle*>();
    ERL_NIF_TERM result = enif_make_resource(env, handle);
    enif_release_resource(handle);
@@ -365,16 +368,15 @@ ASYNC_NIF_DECL(eleveldb_close,
    eleveldb_db_handle* db_handle;
  },
  { // pre
+
    if (!(enif_get_resource(env, argv[0], eleveldb_db_RESOURCE, (void**)&(args->db_handle)))) {
      ASYNC_NIF_RETURN_BADARG();
    }
-
    enif_keep_resource(args->db_handle);
  },
  { // work
 
    ERL_NIF_TERM result;
-
    enif_mutex_lock(args->db_handle->db_lock);
    if (args->db_handle->db) {
      free_db(args->db_handle);
@@ -395,7 +397,7 @@ ASYNC_NIF_DECL(eleveldb_get,
  { // args struct
 
    eleveldb_db_handle* db_handle;
-   leveldb::ReadOptions opts;
+   ERL_NIF_TERM opts;
    ERL_NIF_TERM key;
  },
  { // pre
@@ -407,15 +409,17 @@ ASYNC_NIF_DECL(eleveldb_get,
    }
 
    args->key = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
-   // Parse out the read options
-   ERL_NIF_TERM result = fold(env, argv[2], parse_read_option, args->opts);
-   if (result != ATOM_OK)
-     return enif_make_tuple2(env, ATOM_ERROR, result);
-
-   // Retain the handle
+   args->opts = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[2]);
    enif_keep_resource(args->db_handle);
  },
  { // work
+
+   leveldb::ReadOptions opts;
+   ERL_NIF_TERM result = fold(env, args->opts, parse_read_option, opts);
+   if (result != ATOM_OK) {
+     ASYNC_NIF_REPLY(enif_make_tuple2(env, ATOM_ERROR, result));
+     return;
+   }
 
    ErlNifBinary key;
    if (!enif_inspect_binary(env, args->key, &key)) {
@@ -430,7 +434,7 @@ ASYNC_NIF_DECL(eleveldb_get,
        leveldb::DB* db = args->db_handle->db;
        leveldb::Slice key_slice((const char*)key.data, key.size);
        std::string sval;
-       leveldb::Status status = db->Get(args->opts, key_slice, &sval);
+       leveldb::Status status = db->Get(opts, key_slice, &sval);
        if (status.ok()) {
          const size_t size = sval.size();
          ERL_NIF_TERM value_bin;
@@ -459,45 +463,45 @@ ASYNC_NIF_DECL(eleveldb_write,
  { // args struct
 
    eleveldb_db_handle* db_handle;
-   leveldb::WriteOptions opts;
-   leveldb::WriteBatch batch;
+   ERL_NIF_TERM opts;
    ERL_NIF_TERM item;
  },
  { // pre
-
-   ERL_NIF_TERM result = ATOM_OK;
 
    if (!(enif_get_resource(env, argv[0], eleveldb_db_RESOURCE, (void**)&args->db_handle) &&
          enif_is_list(env, argv[1]) && // Actions
          enif_is_list(env, argv[2]))) {// Opts
      ASYNC_NIF_RETURN_BADARG();
    }
-
-   // Parse out the write options
-   if ((result = fold(env, argv[2], parse_write_option, args->opts)) != ATOM_OK) {
-     return enif_make_tuple2(env, ATOM_ERROR, result);
-   }
-
-   // Traverse actions and build a write batch
    args->item = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
-   if ((result = fold(ASYNC_NIF_WORK_ENV, args->item, write_batch_item, args->batch)) != ATOM_OK) {
-     return enif_make_tuple2(env, ATOM_ERROR,
-                             enif_make_tuple2(env, ATOM_BAD_WRITE_ACTION, result));
-   }
-
-   // Retain the handle
+   args->opts = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[2]);
    enif_keep_resource(args->db_handle);
  },
  { // work
+
+   ERL_NIF_TERM result = ATOM_OK;
+   leveldb::WriteBatch batch;
+   leveldb::WriteOptions opts;
+   if ((result = fold(env, args->opts, parse_write_option, opts)) != ATOM_OK) {
+     ASYNC_NIF_REPLY(enif_make_tuple2(env, ATOM_ERROR, result));
+     return;
+   }
+
+   // Traverse actions and build a write batch
+   if ((result = fold(env, args->item, write_batch_item, batch)) != ATOM_OK) {
+     ASYNC_NIF_REPLY(enif_make_tuple2(env, ATOM_ERROR, enif_make_tuple2(env, ATOM_BAD_WRITE_ACTION, result)));
+     return;
+   }
 
    enif_mutex_lock(args->db_handle->db_lock);
    if (args->db_handle->db == NULL) {
      enif_mutex_unlock(args->db_handle->db_lock);
      ASYNC_NIF_REPLY(enif_make_tuple2(env, ATOM_ERROR, ATOM_EINVAL));
+     return;
    }
 
    // TODO: Why does the API want a WriteBatch* versus a ref?
-   leveldb::Status status = args->db_handle->db->Write(args->opts, &args->batch);
+   leveldb::Status status = args->db_handle->db->Write(opts, &batch);
    if (status.ok()) {
      enif_mutex_unlock(args->db_handle->db_lock);
      ASYNC_NIF_REPLY(ATOM_OK);
@@ -517,7 +521,7 @@ ASYNC_NIF_DECL(eleveldb_iterator,
 
    eleveldb_db_handle* db_handle;
    unsigned int keys_only;
-   leveldb::ReadOptions opts;
+   ERL_NIF_TERM opts;
  },
  { // pre
 
@@ -525,17 +529,14 @@ ASYNC_NIF_DECL(eleveldb_iterator,
          enif_is_list(env, argv[1]))) { // Options
      ASYNC_NIF_RETURN_BADARG();
    }
-
-   // Parse out the read options
-   fold(env, argv[1], parse_read_option, args->opts);
-
-   // Check for keys_only iterator flag
+   args->opts = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
    args->keys_only = ((argc == 3) && (argv[2] == ATOM_KEYS_ONLY));
-
-   // Retain the handle
    enif_keep_resource(args->db_handle);
  },
  { // work
+
+   leveldb::ReadOptions opts;
+   fold(env, args->opts, parse_read_option, opts);
 
    enif_mutex_lock(args->db_handle->db_lock);
    if (args->db_handle->db == NULL) {
@@ -559,8 +560,8 @@ ASYNC_NIF_DECL(eleveldb_iterator,
      itr_handle->itr_lock = enif_mutex_create((char*)"eleveldb_itr_lock");
      itr_handle->db_handle = args->db_handle;
      itr_handle->snapshot = args->db_handle->db->GetSnapshot();
-     args->opts.snapshot = itr_handle->snapshot;
-     itr_handle->itr = args->db_handle->db->NewIterator(args->opts);
+     opts.snapshot = itr_handle->snapshot;
+     itr_handle->itr = args->db_handle->db->NewIterator(opts);
      itr_handle->keys_only = args->keys_only;
 
      ERL_NIF_TERM result = enif_make_resource(env, itr_handle);
@@ -720,8 +721,6 @@ ASYNC_NIF_DECL(eleveldb_status,
      ASYNC_NIF_RETURN_BADARG();
    }
    args->item = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
-
-   // Retain the handle
    enif_keep_resource(args->db_handle);
  },
  { // work
@@ -760,20 +759,17 @@ ASYNC_NIF_DECL(eleveldb_repair,
  { // args struct
 
    char name[4096];
-   leveldb::Options opts;
  },
  { // pre
 
    if (!(enif_get_string(env, argv[0], args->name, sizeof(args->name), ERL_NIF_LATIN1))) {
      ASYNC_NIF_RETURN_BADARG();
    }
-
-   // Parse out the options
-   // fold(env, argv[1], parse_repair_option, opts);
  },
  { // work
 
-   leveldb::Status status = leveldb::RepairDB(args->name, args->opts);
+   leveldb::Options opts;
+   leveldb::Status status = leveldb::RepairDB(args->name, opts);
    if (!status.ok()) {
      ASYNC_NIF_REPLY(error_tuple(env, ATOM_ERROR_DB_REPAIR, status));
    } else {
@@ -788,7 +784,7 @@ ASYNC_NIF_DECL(eleveldb_destroy,
  { // args struct
 
    char name[4096];
-   leveldb::Options opts;
+   ERL_NIF_TERM opts;
  },
  { // pre
 
@@ -796,13 +792,14 @@ ASYNC_NIF_DECL(eleveldb_destroy,
          enif_is_list(env, argv[1]))) {
      ASYNC_NIF_RETURN_BADARG();
    }
-
-   // Parse out the options
-   fold(env, argv[1], parse_open_option, args->opts);
+   args->opts = enif_make_copy(ASYNC_NIF_WORK_ENV, argv[1]);
  },
  { // work
 
-   leveldb::Status status = leveldb::DestroyDB(args->name, args->opts);
+   leveldb::Options opts;
+   fold(env, args->opts, parse_open_option, opts);
+
+   leveldb::Status status = leveldb::DestroyDB(args->name, opts);
    if (!status.ok()) {
      ASYNC_NIF_REPLY(error_tuple(env, ATOM_ERROR_DB_DESTROY, status));
    } else {
@@ -823,8 +820,6 @@ ASYNC_NIF_DECL(eleveldb_is_empty,
    if (!(enif_get_resource(env, argv[0], eleveldb_db_RESOURCE, (void**)&args->db_handle))) {
      ASYNC_NIF_RETURN_BADARG();
    }
-
-   // Retain the handle
    enif_keep_resource(args->db_handle);
  },
  { // work
@@ -940,7 +935,7 @@ static int on_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     ATOM(ATOM_COMPRESSION, "compression");
     ATOM(ATOM_USE_BLOOMFILTER, "use_bloomfilter");
 
-    ASYNC_NIF_LOAD(64);
+    ASYNC_NIF_LOAD();
     return 0;
 }
 

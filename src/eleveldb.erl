@@ -427,8 +427,5 @@ prop_put_delete() ->
 prop_put_delete_test_() ->
     {timeout, 3*60, fun() -> qc(prop_put_delete()) end}.
 
-
-
 -endif.
-
 -endif.
