@@ -37,6 +37,8 @@
 #include "leveldb/cache.h"
 #include "leveldb/filter_policy.h"
 
+#define MAX_BATCH 100 // TODO: do something more C++y
+
 // Atoms (initialized in on_load)
 static ERL_NIF_TERM ATOM_TRUE;
 static ERL_NIF_TERM ATOM_FALSE;
@@ -93,7 +95,10 @@ static ErlNifFunc nif_funcs[] =
     {"async_iterator", 3, eleveldb::async_iterator},
     {"async_iterator", 4, eleveldb::async_iterator},
 
-    {"async_iterator_move", 3, eleveldb::async_iterator_move}
+    {"async_iterator_move", 3, eleveldb::async_iterator_move},
+
+    {"async_iterator_seek", 5, eleveldb::async_iterator_seek},
+    {"async_iterator_read", 2, eleveldb::async_iterator_read}
 };
 
 using std::copy;
@@ -327,6 +332,10 @@ struct eleveldb_itr_handle
     const leveldb::Snapshot*   snapshot;
     eleveldb_db_handle* db_handle;
     bool keys_only;
+
+    int prefetch_batch_size;  // how many to prefetch
+    ErlNifEnv* prefetch_env;
+    ERL_NIF_TERM prefetch_term;
 };
 
 void *eleveldb_write_thread_worker(void *args);
@@ -346,11 +355,13 @@ class work_task_t
  ERL_NIF_TERM   caller_ref_term,
                 caller_pid_term;
 
+ bool           no_reply_;
+
  private:
  ErlNifPid local_pid;   // maintain for task lifetime (JFW)
 
  public:
- work_task_t(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref)
+  work_task_t(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref, bool no_reply = false)
  {
     local_env_ = enif_alloc_env();
 
@@ -360,6 +371,8 @@ class work_task_t
     caller_ref_term = enif_make_copy(local_env_, caller_ref);
 
     caller_pid_term = enif_make_pid(local_env_, enif_self(caller_env, &local_pid));
+
+    no_reply_ = no_reply;
  }
 
  virtual ~work_task_t()
@@ -371,7 +384,7 @@ class work_task_t
 
  const ERL_NIF_TERM& caller_ref() const { return caller_ref_term; }
  const ERL_NIF_TERM& pid() const        { return caller_pid_term; }
-
+ const bool no_reply() const            { return no_reply_; }
  virtual work_result_t operator()()     = 0;
 };
 
@@ -551,6 +564,203 @@ struct iter_move_task_t : public work_task_t
                                             slice_to_binary(local_env(), itr->value())));
  }
 };
+
+
+void
+iter_read_fetch(eleveldb_itr_handle* itr_handle)
+{
+    int count = 0;
+    int batch_size = itr_handle->prefetch_batch_size;
+    ErlNifEnv* prefetch_env = itr_handle->prefetch_env;
+    ERL_NIF_TERM vals[MAX_BATCH];
+    leveldb::Iterator* itr = itr_handle->itr;
+
+    if (itr == NULL)
+    {
+        itr_handle->prefetch_term = enif_make_tuple2(prefetch_env,
+                                                     ATOM_OK, ATOM_ITERATOR_CLOSED);
+    }
+    else if (itr->Valid())
+    {
+        do
+        {
+            if(itr_handle->keys_only)
+            {
+                vals[count] = slice_to_binary(prefetch_env, itr->key());
+            }
+            else
+            {
+                vals[count] = enif_make_tuple2(prefetch_env,
+                                               slice_to_binary(prefetch_env, itr->key()),
+                                               slice_to_binary(prefetch_env, itr->value()));
+
+            }
+            itr->Next();
+            count++;
+        } while (itr->Valid() && count < batch_size);
+        ERL_NIF_TERM val_list = enif_make_list_from_array(prefetch_env, vals, count);
+        itr_handle->prefetch_term = enif_make_tuple2(prefetch_env,
+                                                     ATOM_OK, val_list);
+    }
+    else // arrived at the end of the iterator
+    {
+        itr_handle->prefetch_term = enif_make_tuple2(prefetch_env,
+                                                     ATOM_ERROR, ATOM_INVALID_ITERATOR);
+    }
+}
+
+struct iter_seek_task_t : public work_task_t
+{
+    eleveldb_db_handle*                            db_handle;
+    leveldb::ReadOptions*                          options;
+    ERL_NIF_TERM                                   where;
+    bool                                           keys_only;
+
+    iter_seek_task_t(ErlNifEnv *_caller_env, ERL_NIF_TERM _caller_ref,
+                     eleveldb_db_handle* _db_handle, leveldb::ReadOptions* _opts,
+                     ERL_NIF_TERM _where, bool _keys_only)
+    : work_task_t(_caller_env, _caller_ref, true),
+        db_handle(_db_handle),
+        options(_opts),
+        where(_where),
+        keys_only(_keys_only)
+        {
+            // todo: make copy of where
+        }
+
+    work_result_t operator()()
+    {
+        // Caller to return to
+        ErlNifPid caller;
+        if(0 == enif_get_local_pid(local_env(), pid(), &caller))
+            return make_pair(false, ATOM_ERROR); // shut up compiler
+
+        // Construct the iterator
+        const leveldb::Snapshot* snapshot = db_handle->db->GetSnapshot();
+        leveldb::Iterator* itr;
+        itr = db_handle->db->NewIterator(*options);
+
+        // Seek to start position
+        if (where == ATOM_FIRST) // seek to first key
+        {
+            itr->SeekToFirst();
+        }
+        else
+        {
+            ErlNifBinary key;
+            if(!enif_inspect_binary(local_env(), where, &key))
+                return make_pair(false, ATOM_ERROR);
+            leveldb::Slice key_slice(reinterpret_cast<char *>(key.data), key.size);
+            itr->Seek(key_slice);
+        }
+
+        if (itr->Valid())
+        {
+            // Make the iterator resource
+            eleveldb_itr_handle* itr_handle =
+                (eleveldb_itr_handle*) enif_alloc_resource(eleveldb_itr_RESOURCE,
+                                                           sizeof(eleveldb_itr_handle));
+            memset(itr_handle, '\0', sizeof(eleveldb_itr_handle));
+
+            // Initialize itr handle
+            itr_handle->itr_lock = enif_mutex_create((char*)"eleveldb_itr_lock");
+            itr_handle->db_handle = db_handle;
+
+            itr_handle->snapshot = snapshot;
+            options->snapshot = itr_handle->snapshot;
+
+            itr_handle->itr = itr;
+            itr_handle->keys_only = keys_only;
+
+            itr_handle->prefetch_batch_size = 5;
+            itr_handle->prefetch_env = enif_alloc_env();
+
+            enif_mutex_lock(db_handle->db_lock);
+            db_handle->iters->insert(itr_handle);
+            enif_mutex_unlock(db_handle->db_lock);
+
+            // Grab the lock so we can prefetch after telling the caller
+            // about the iterator.
+            enif_mutex_lock(itr_handle->itr_lock);
+            //simple_scoped_lock l(itr_handle->itr_lock); DO NOT TRUST
+
+            enif_send(NULL, &caller, local_env(),
+                      enif_make_tuple2(
+                          local_env(),
+                          caller_ref(),
+                          enif_make_tuple2(
+                              local_env(),
+                              ATOM_OK,
+                              enif_make_resource(local_env(), itr_handle))));
+
+            // prefetch
+            iter_read_fetch(itr_handle);
+
+            enif_mutex_unlock(itr_handle->itr_lock);
+
+            // no longer used by worker thread, sending message
+            // to the caller will ensure non-zero count
+            //enif_release_resource(itr_handle);
+    }
+    else
+    {
+        // Nothing to iterate on, save a few round trips.
+        delete itr;
+        db_handle->db->ReleaseSnapshot(snapshot);
+
+        enif_send(NULL, &caller, local_env(),
+                  enif_make_tuple2(
+                      local_env(),
+                      caller_ref(),
+                      enif_make_tuple2(
+                          local_env(),
+                          ATOM_ERROR,
+                          ATOM_INVALID_ITERATOR)));
+    }
+    return make_pair(false, ATOM_ERROR); // shut up compiler
+  }
+};
+
+struct iter_read_task_t : public work_task_t
+{
+ simple_scoped_refcount<eleveldb_itr_handle>    itr_handle_refcount;
+ mutable eleveldb_itr_handle*                   itr_handle;
+
+ iter_read_task_t(ErlNifEnv *_caller_env, ERL_NIF_TERM _caller_ref,
+                  eleveldb_itr_handle *_itr_handle)
+     : work_task_t(_caller_env, _caller_ref, true),
+   itr_handle_refcount(_itr_handle),
+   itr_handle(_itr_handle)
+ {}
+
+ work_result_t operator()()
+ {
+     // Grab the lock so we can send prefetch_term
+     // then grab the next block
+     enif_mutex_lock(itr_handle->itr_lock);
+     //simple_scoped_lock l(itr_handle->itr_lock); DO NOT TRUST
+
+    // Send prefetched message to process
+    // Caller to return to
+    ErlNifPid caller;
+    if(0 == enif_get_local_pid(local_env(), pid(), &caller))
+        return make_pair(false, ATOM_ERROR); // shut up compiler
+    enif_send(NULL, &caller, itr_handle->prefetch_env, 
+              enif_make_tuple2(
+                  itr_handle->prefetch_env,
+                  enif_make_copy(itr_handle->prefetch_env, caller_ref()),
+                  itr_handle->prefetch_term));
+    enif_clear_env(itr_handle->prefetch_env);
+
+    // Prefetch next batch ready - must keep iter locked in case they ask for it again.
+    iter_read_fetch(itr_handle);
+
+    enif_mutex_unlock(itr_handle->itr_lock);
+
+    return make_pair(false, ATOM_ERROR); // shut up compiler
+ }
+};
+
 
 struct get_task_t : public work_task_t
 {
@@ -949,8 +1159,15 @@ void *eleveldb_write_thread_worker(void *args)
     h.unlock();
 
     // Do the work:
-    if(false == eleveldb_thread_pool::notify_caller(*submission))
-     ; // There isn't much to be done if this has failed. We have no supervisor process.
+    if (submission->no_reply())
+    {
+        (*submission)();
+    }
+    else
+    {
+        if(false == eleveldb_thread_pool::notify_caller(*submission))
+            ; // There isn't much to be done if this has failed. We have no supervisor process.
+    }
 
     // Free the job entry:
     placement_dtor(submission);
@@ -1111,6 +1328,7 @@ static void free_itr(eleveldb_itr_handle* itr_handle)
         delete itr_handle->itr;
         itr_handle->itr = 0;
         itr_handle->db_handle->db->ReleaseSnapshot(itr_handle->snapshot);
+        enif_free_env(itr_handle->prefetch_env);
     }
 }
 
@@ -1338,6 +1556,58 @@ ERL_NIF_TERM async_iterator_move(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
  return ATOM_OK;
 }
 
+ERL_NIF_TERM async_iterator_seek(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    const ERL_NIF_TERM& caller_ref  = argv[0];
+    const ERL_NIF_TERM& dbh_ref = argv[1];
+    const ERL_NIF_TERM& options_ref  = argv[2];
+    const ERL_NIF_TERM& where = argv[3];
+    const ERL_NIF_TERM& keys_only = argv[4];
+
+    eleveldb_db_handle* db_handle;
+    if (!enif_get_resource(env, dbh_ref, eleveldb_db_RESOURCE, (void**)&db_handle) &&
+        !enif_is_list(env, options_ref))
+     {
+        return enif_make_badarg(env);
+     }
+
+    // Parse out the read options
+    leveldb::ReadOptions *opts = placement_ctor<leveldb::ReadOptions>();
+    fold(env, options_ref, parse_read_option, *opts);
+
+    iter_seek_task_t* work_item = placement_ctor<eleveldb::iter_seek_task_t>(
+        env, caller_ref, db_handle, opts, where, keys_only == ATOM_TRUE);
+
+    eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
+
+    if(false == priv.thread_pool.submit(work_item))
+        return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+
+    return ATOM_OK;
+}
+
+ERL_NIF_TERM async_iterator_read(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    const ERL_NIF_TERM& caller_ref  = argv[0];
+    const ERL_NIF_TERM& itr_ref = argv[1];
+
+    eleveldb_itr_handle* itr_handle;
+    if (!enif_get_resource(env, itr_ref, eleveldb_itr_RESOURCE, (void**)&itr_handle))
+    {
+        return enif_make_badarg(env);
+    }
+
+    iter_read_task_t* work_item = placement_ctor<eleveldb::iter_read_task_t>(
+        env, caller_ref, itr_handle);
+
+    eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
+
+    if(false == priv.thread_pool.submit(work_item))
+        return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+
+    return ATOM_OK;
+}
+
 ERL_NIF_TERM async_write(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
     const ERL_NIF_TERM& caller_ref = argv[0];
@@ -1421,7 +1691,7 @@ ERL_NIF_TERM eleveldb_iterator_close(ErlNifEnv* env, int argc, const ERL_NIF_TER
         enif_mutex_unlock(itr_handle->itr_lock);
         enif_mutex_unlock(itr_handle->db_handle->db_lock);
 
-        enif_release_resource(itr_handle->db_handle); // matches keep in eleveldb_iterator()
+        //enif_release_resource(itr_handle->db_handle); // matches keep in eleveldb_iterator()
 
         return ATOM_OK;
     }
