@@ -672,7 +672,7 @@ struct iter_seek_task_t : public work_task_t
             itr_handle->itr = itr;
             itr_handle->keys_only = keys_only;
 
-            itr_handle->prefetch_batch_size = 5;
+            itr_handle->prefetch_batch_size = MAX_BATCH;
             itr_handle->prefetch_env = enif_alloc_env();
 
             enif_mutex_lock(db_handle->db_lock);
