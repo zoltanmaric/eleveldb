@@ -27,6 +27,8 @@
          put/4,
          delete/3,
          write/3,
+         old_fold/4,
+         old_fold_keys/4,
          fold/4,
          fold_keys/4,
          status/2,
@@ -224,8 +226,8 @@ iterator_close_int(_IRef) ->
 
 %% Fold over the keys and values in the database
 %% will throw an exception if the database is closed while the fold runs
--spec fold(db_ref(), fold_fun(), any(), read_options()) -> any().
-fold(Ref, Fun, Acc0, Opts) ->
+-spec old_fold(db_ref(), fold_fun(), any(), read_options()) -> any().
+old_fold(Ref, Fun, Acc0, Opts) ->
     {ok, Itr} = iterator(Ref, Opts),
     do_fold(Itr, Fun, Acc0, Opts).
 
@@ -233,10 +235,72 @@ fold(Ref, Fun, Acc0, Opts) ->
 
 %% Fold over the keys in the database
 %% will throw an exception if the database is closed while the fold runs
--spec fold_keys(db_ref(), fold_keys_fun(), any(), read_options()) -> any().
-fold_keys(Ref, Fun, Acc0, Opts) ->
+-spec old_fold_keys(db_ref(), fold_keys_fun(), any(), read_options()) -> any().
+old_fold_keys(Ref, Fun, Acc0, Opts) ->
     {ok, Itr} = iterator(Ref, Opts, keys_only),
     do_fold(Itr, Fun, Acc0, Opts).
+
+-spec async_iterator_seek(reference(), db_ref(), read_options(), atom() | binary(),
+                         true | false) ->
+                                 {reference(), {error, any()} | {ok, itr_ref()}}.
+async_iterator_seek(_CallerRef, _Ref, _Opts, _Where, _KeysOnly) ->
+    erlang:nif_error({error, not_loaded}).
+
+-spec async_iterator_read(reference(), itr_ref()) -> {reference(), {error, any()} | {ok, itr_ref()}}.
+async_iterator_read(_CallerRef, _Iter) ->
+    erlang:nif_error({error, not_loaded}).
+
+%% Fold over the keys and values in the database
+%% will throw an exception if the database is closed while the fold runs
+%% -type fold_fun() :: fun(({Key::binary(), Value::binary()}, any()) -> any()).
+-spec fold(db_ref(), fold_fun(), any(), read_options()) -> any().
+fold(DbRef, Fun, Acc0, Opts) ->
+    fold(DbRef, Fun, Acc0, Opts, false).
+
+%% Fold over the keys in the database
+%% will throw an exception if the database is closed while the fold runs
+%% -type fold_keys_fun() :: fun((Key::binary(), any()) -> any()).
+-spec fold_keys(db_ref(), fold_keys_fun(), any(), read_options()) -> any().
+fold_keys(DbRef, Fun, Acc0, Opts) ->
+    fold(DbRef, Fun, Acc0, Opts, true).
+
+fold(DbRef, Fun, Acc0, Opts, KeysOnly) ->
+    Where = proplists:get_value(first_key, Opts, first),
+    true = is_binary(Where) or (Where == first),
+    RRef = make_ref(),
+    ok = async_iterator_seek(RRef, DbRef, Opts, Where, KeysOnly),
+    receive
+        {RRef, {error, invalid_iterator}} ->
+            Acc0;
+        {RRef, {error, _Reason}=ER} ->
+            ER;
+        {RRef, {ok, Itr}} ->
+            try
+                fold_loop(Itr, Fun, Acc0)
+            after
+                iterator_close(Itr)
+            end
+    after
+        5000 ->
+            throw(timeout)
+    end.
+
+fold_loop(Itr, Fun, Acc0) ->
+    RRef = make_ref(),
+    ok = async_iterator_read(RRef, Itr),
+    receive
+        {RRef, {error, invalid_iterator}} ->
+            Acc0;
+        {RRef, {error, _Reason}=ER} ->
+            ER;
+        {RRef, {ok, Vals}} ->
+            Acc = lists:foldl(Fun, Acc0, Vals),
+            fold_loop(Itr, Fun, Acc)
+    after
+        5000 ->
+            throw(timeout)
+    end.
+
 
 -spec status(db_ref(), Key::binary()) -> {ok, binary()} | error.
 status(Ref, Key) ->
