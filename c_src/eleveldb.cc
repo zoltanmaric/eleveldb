@@ -1691,6 +1691,9 @@ ERL_NIF_TERM async_iterator_seek(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
         return enif_make_badarg(env);
      }
 
+    // Increment references to db_handle for duration of the iterator
+    enif_keep_resource(db_handle);
+
     // Parse out the read options
     leveldb::ReadOptions *opts = placement_ctor<leveldb::ReadOptions>();
     fold(env, options_ref, parse_read_option, *opts);
