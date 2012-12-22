@@ -204,15 +204,21 @@ async_iterator_move(_CallerRef, _IterRef, _IterAction) ->
                                                      {error, invalid_iterator} |
                                                      {error, iterator_closed}.
 iterator_move(_IRef, _Loc) ->
-    _CallerRef = make_ref(),
-    case async_iterator_move(_CallerRef, _IRef, _Loc) of
+    case async_iterator_move(false, _IRef, _Loc) of
     ok ->
-        receive
-            { _CallerRef, get_value} ->
-                iterator_value(_IRef);
-            { _CallerRef, X}                    -> X
-        end;
+        wait_for_value(0, _IRef);
     ER -> ER
+    end.
+
+wait_for_value(N, IRef) ->
+    case iterator_value(IRef) of
+        not_ready ->
+            %% erlang:yield(),
+            erlang:bump_reductions(700),
+            wait_for_value(N+1, IRef);
+        Value ->
+            %% io:format("N: ~p~n", [N]),
+            Value
     end.
 
 iterator_value(_IRef) ->

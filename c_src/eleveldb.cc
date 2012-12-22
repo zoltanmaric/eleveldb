@@ -86,7 +86,8 @@ static ERL_NIF_TERM ATOM_KEYS_ONLY;
 static ERL_NIF_TERM ATOM_COMPRESSION;
 static ERL_NIF_TERM ATOM_ERROR_DB_REPAIR;
 static ERL_NIF_TERM ATOM_USE_BLOOMFILTER;
-static ERL_NIF_TERM ATOM_GET_VALUE;
+static ERL_NIF_TERM ATOM_NOT_READY;
+static ERL_NIF_TERM ATOM_NO_MESSAGE;
 
 static ErlNifFunc nif_funcs[] =
 {
@@ -331,6 +332,14 @@ struct eleveldb_db_handle
     eleveldb_db_handle& operator=(const eleveldb_db_handle&);   // nocopyassign
 };
 
+enum iterator_result_t {
+    ITER_OK,
+    ITER_CLOSED,
+    ITER_INVALID,
+    ITER_BADARG,
+    ITER_THROW_BADARG
+};
+
 struct eleveldb_itr_handle
 {
     leveldb::Iterator*   itr;
@@ -339,6 +348,9 @@ struct eleveldb_itr_handle
     eleveldb_db_handle* db_handle;
     bool keys_only;
     ErlNifEnv *result_env;
+    ErlNifMutex* result_lock;
+    iterator_result_t result_type;
+    bool result_ready;
 };
 
 void *eleveldb_write_thread_worker(void *args);
@@ -378,7 +390,8 @@ class work_task_t
     if(0 == local_env_)
      throw std::invalid_argument("work_task_t::local_env_");
 
-    caller_ref_term = enif_make_copy(local_env_, caller_ref);
+    if(caller_ref != ATOM_FALSE)
+      caller_ref_term = enif_make_copy(local_env_, caller_ref);
  }
 
  virtual ~work_task_t()
@@ -464,6 +477,8 @@ struct iter_task_t : public work_task_t
     itr_handle->itr = db_handle->db->NewIterator(*options);
     itr_handle->keys_only = keys_only;
     itr_handle->result_env = enif_alloc_env();
+    itr_handle->result_lock = enif_mutex_create((char*)"eleveldb_result_lock");
+    itr_handle->result_ready = false;
 
     ERL_NIF_TERM result = enif_make_resource(local_env(), itr_handle);
 
@@ -504,12 +519,20 @@ struct iter_move_task_t : public work_task_t
                   eleveldb_itr_handle *_itr_handle,
                   action_t& _action,
                   ERL_NIF_TERM _seek_target)
- : work_task_t(_caller_env, _caller_ref),
+ : work_task_t(_caller_env, _caller_ref, _itr_handle->result_env),
    itr_handle_refcount(_itr_handle),
    itr_handle(_itr_handle),
    action(_action),
    seek_target(enif_make_copy(local_env_, _seek_target))
  {}
+
+ work_result iterator_result(iterator_result_t result)
+ {
+   simple_scoped_lock l(itr_handle->result_lock);
+   itr_handle->result_type = result;
+   itr_handle->result_ready = true;
+   return work_result(ATOM_NO_MESSAGE);
+ }
 
  work_result operator()()
  {
@@ -520,13 +543,13 @@ struct iter_move_task_t : public work_task_t
     leveldb::Iterator* itr = itr_handle->itr;
 
     if(0 == itr)
-     return work_result(local_env(), ATOM_ERROR, ATOM_ITERATOR_CLOSED);
-
+     return iterator_result(ITER_CLOSED);
+     
     switch(action)
      {
         default:
                     // JFW: note: *not* { ERROR, badarg() } here-- we want the exception:
-                    return work_result(enif_make_badarg(local_env()));
+                    return iterator_result(ITER_THROW_BADARG);
                     break;
 
         case FIRST:
@@ -539,21 +562,21 @@ struct iter_move_task_t : public work_task_t
 
         case NEXT:
                     if(!itr->Valid())
-                     return work_result(local_env(), ATOM_ERROR, ATOM_INVALID_ITERATOR);
+                      return iterator_result(ITER_INVALID);
 
                     itr->Next();
                     break;
 
         case PREV:
                     if(!itr->Valid())
-                     return work_result(local_env(), ATOM_ERROR, ATOM_INVALID_ITERATOR);
+                      return iterator_result(ITER_INVALID);
 
                     itr->Prev();
                     break;
 
         case SEEK:
                     if(!enif_inspect_binary(local_env(), seek_target, &key))
-                     return work_result(local_env(), ATOM_ERROR, enif_make_badarg(local_env()));
+                      return iterator_result(ITER_BADARG);
 
                     leveldb::Slice key_slice(reinterpret_cast<char *>(key.data), key.size);
 
@@ -561,7 +584,7 @@ struct iter_move_task_t : public work_task_t
                     break;
      }
 
-    return work_result(ATOM_GET_VALUE);
+    return iterator_result(ITER_OK);
  }
 };
 
@@ -1008,7 +1031,11 @@ bool eleveldb_thread_pool::notify_caller(eleveldb::work_task_t& work_item)
 
  // Call the work function:
  basho::async_nif::work_result result = work_item();
- 
+
+ if(result.result() == ATOM_NO_MESSAGE) {
+   return true;
+ }
+
  /* Assemble a notification of the following form:
         { PID CallerHandle, ERL_NIF_TERM result } */
  ERL_NIF_TERM result_tuple = enif_make_tuple2(work_item.local_env(), 
@@ -1421,18 +1448,44 @@ ERL_NIF_TERM iterator_value(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
                        (void **)&itr_handle))
    return enif_make_badarg(env);
 
- leveldb::Iterator* itr = itr_handle->itr;
+ {
+   simple_scoped_lock l(itr_handle->result_lock);
 
- if(!itr->Valid())
-   return enif_make_tuple2(env, ATOM_ERROR, ATOM_INVALID_ITERATOR);
+   if(!itr_handle->result_ready) {
+     return ATOM_NOT_READY;
+   }
 
- if(itr_handle->keys_only)
-   return enif_make_tuple2(env, ATOM_OK, slice_to_binary(env, itr->key()));
+   switch(itr_handle->result_type) {
+   case ITER_CLOSED:
+     return enif_make_tuple2(env, ATOM_ERROR, ATOM_ITERATOR_CLOSED);
+   case ITER_INVALID:
+     return enif_make_tuple2(env, ATOM_ERROR, ATOM_INVALID_ITERATOR);
+   case ITER_BADARG:
+     return enif_make_tuple2(env, ATOM_ERROR, enif_make_badarg(env));
+   case ITER_THROW_BADARG:
+     // Seems odd to have badarg sent between threads. But, this is what
+     // master does.
+     return enif_make_badarg(env);
+   case ITER_OK:
+     break;
+   default:
+     return ATOM_ERROR;
+   }
 
- return enif_make_tuple3(env,
-                         ATOM_OK,
-                         slice_to_binary(env, itr->key()),
-                         slice_to_binary(env, itr->value()));
+   /* ITER_OK case */
+   leveldb::Iterator* itr = itr_handle->itr;
+
+   if(!itr->Valid())
+     return enif_make_tuple2(env, ATOM_ERROR, ATOM_INVALID_ITERATOR);
+
+   if(itr_handle->keys_only)
+     return enif_make_tuple2(env, ATOM_OK, slice_to_binary(env, itr->key()));
+
+   return enif_make_tuple3(env,
+                           ATOM_OK,
+                           slice_to_binary(env, itr->key()),
+                           slice_to_binary(env, itr->value()));
+ }
 }
 
 ERL_NIF_TERM async_iterator_move(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -1456,6 +1509,12 @@ ERL_NIF_TERM async_iterator_move(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
 
  eleveldb::iter_move_task_t::action_t action = eleveldb::iter_move_task_t::SEEK;
 
+ {
+   // simple_scoped_lock l(itr_handle->result_lock);
+   itr_handle->result_ready = false;
+   enif_clear_env(itr_handle->result_env);
+ }
+
  // If we have an atom, it's one of these (action_or_target's value is ignored):
  if(enif_is_atom(env, action_or_target))
   {
@@ -1463,8 +1522,6 @@ ERL_NIF_TERM async_iterator_move(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
     if(ATOM_LAST == action_or_target)   action = eleveldb::iter_move_task_t::LAST;
     if(ATOM_NEXT == action_or_target)   action = eleveldb::iter_move_task_t::NEXT;
     if(ATOM_PREV == action_or_target)   action = eleveldb::iter_move_task_t::PREV;
-
-    enif_clear_env(itr_handle->result_env);
 
     work_item = placement_ctor<eleveldb::iter_move_task_t>(
                  env, caller_ref,
@@ -1726,6 +1783,7 @@ static void eleveldb_itr_resource_cleanup(ErlNifEnv* env, void* arg)
 
     enif_mutex_destroy(itr_handle->itr_lock);
     enif_free_env(itr_handle->result_env);
+    enif_mutex_destroy(itr_handle->result_lock);
 }
 
 static void on_unload(ErlNifEnv *env, void *priv_data)
@@ -1842,7 +1900,7 @@ try
     ATOM(ATOM_KEYS_ONLY, "keys_only");
     ATOM(ATOM_COMPRESSION, "compression");
     ATOM(ATOM_USE_BLOOMFILTER, "use_bloomfilter");
-    ATOM(ATOM_GET_VALUE, "get_value");
+    ATOM(ATOM_NOT_READY, "not_ready");
 
 #undef ATOM
 
