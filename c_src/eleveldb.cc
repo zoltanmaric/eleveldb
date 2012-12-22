@@ -43,6 +43,10 @@
 
 #include "detail.hpp"
 
+extern "C" {
+int erts_printf(const char *, ...);
+}
+
 // Atoms (initialized in on_load)
 static ERL_NIF_TERM ATOM_TRUE;
 static ERL_NIF_TERM ATOM_FALSE;
@@ -332,6 +336,7 @@ struct eleveldb_itr_handle
     const leveldb::Snapshot*   snapshot;
     eleveldb_db_handle* db_handle;
     bool keys_only;
+    ErlNifEnv *result_env;
 };
 
 void *eleveldb_write_thread_worker(void *args);
@@ -347,6 +352,7 @@ class work_task_t
 {
  protected:
  ErlNifEnv      *local_env_;
+ bool           free_env;
 
  ERL_NIF_TERM   caller_ref_term,
                 caller_pid_term;
@@ -354,10 +360,18 @@ class work_task_t
  public:
  ErlNifPid local_pid;   // maintain for task lifetime (JFW)
 
- work_task_t(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref)
+ work_task_t(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref,
+             ErlNifEnv *local_env = NULL)
  {
+    if(!local_env) {
+        local_env_ = enif_alloc_env();
+        free_env = true;
+    }
+    else {
+        local_env_ = local_env;
+        free_env = false;
+    }
     enif_self(caller_env, &local_pid);
-    local_env_ = enif_alloc_env();
 
     if(0 == local_env_)
      throw std::invalid_argument("work_task_t::local_env_");
@@ -367,7 +381,8 @@ class work_task_t
 
  virtual ~work_task_t()
  {
-    enif_free_env(local_env_);
+    if(free_env)
+        enif_free_env(local_env_);
  }
 
  ErlNifEnv *local_env() const           { return local_env_; }
@@ -446,6 +461,7 @@ struct iter_task_t : public work_task_t
 
     itr_handle->itr = db_handle->db->NewIterator(*options);
     itr_handle->keys_only = keys_only;
+    itr_handle->result_env = enif_alloc_env();
 
     ERL_NIF_TERM result = enif_make_resource(local_env(), itr_handle);
 
@@ -474,7 +490,7 @@ struct iter_move_task_t : public work_task_t
  iter_move_task_t(ErlNifEnv *_caller_env, ERL_NIF_TERM _caller_ref,
                   eleveldb_itr_handle *_itr_handle,
                   action_t& _action)
- : work_task_t(_caller_env, _caller_ref),
+ : work_task_t(_caller_env, _caller_ref, _itr_handle->result_env),
    itr_handle_refcount(_itr_handle),
    itr_handle(_itr_handle),
    action(_action),
@@ -1430,6 +1446,8 @@ ERL_NIF_TERM async_iterator_move(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
     if(ATOM_NEXT == action_or_target)   action = eleveldb::iter_move_task_t::NEXT;
     if(ATOM_PREV == action_or_target)   action = eleveldb::iter_move_task_t::PREV;
 
+    enif_clear_env(itr_handle->result_env);
+
     work_item = placement_ctor<eleveldb::iter_move_task_t>(
                  env, caller_ref,
                  itr_handle, action
@@ -1689,6 +1707,7 @@ static void eleveldb_itr_resource_cleanup(ErlNifEnv* env, void* arg)
     }
 
     enif_mutex_destroy(itr_handle->itr_lock);
+    enif_free_env(itr_handle->result_env);
 }
 
 static void on_unload(ErlNifEnv *env, void *priv_data)
