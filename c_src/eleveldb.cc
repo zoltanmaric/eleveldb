@@ -333,7 +333,7 @@ struct eleveldb_itr_handle
     eleveldb_db_handle* db_handle;
     bool keys_only;
 
-    int prefetch_batch_size;  // how many to prefetch
+    int prefetch_batch_size;  // maximum to prefetch - grows on success
     ErlNifEnv* prefetch_env;
     ERL_NIF_TERM prefetch_term;
 };
@@ -601,6 +601,18 @@ iter_read_fetch(eleveldb_itr_handle* itr_handle)
         ERL_NIF_TERM val_list = enif_make_list_from_array(prefetch_env, vals, count);
         itr_handle->prefetch_term = enif_make_tuple2(prefetch_env,
                                                      ATOM_OK, val_list);
+
+        // Grow the max batch rapidly.  Do minimal work in cases where only a few keys
+	// are required before the iterator throws, but grow rapidly when iterating
+	// over a large set.
+	if (itr_handle->prefetch_batch_size < MAX_BATCH)
+	{
+            itr_handle->prefetch_batch_size *= 10;
+	    if (itr_handle->prefetch_batch_size > MAX_BATCH)
+            {
+                itr_handle->prefetch_batch_size = MAX_BATCH;
+            }
+	}
     }
     else // arrived at the end of the iterator
     {
@@ -672,7 +684,7 @@ struct iter_seek_task_t : public work_task_t
             itr_handle->itr = itr;
             itr_handle->keys_only = keys_only;
 
-            itr_handle->prefetch_batch_size = MAX_BATCH;
+            itr_handle->prefetch_batch_size = 1;
             itr_handle->prefetch_env = enif_alloc_env();
 
             enif_mutex_lock(db_handle->db_lock);
