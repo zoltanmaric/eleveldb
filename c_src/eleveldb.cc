@@ -86,6 +86,7 @@ static ERL_NIF_TERM ATOM_KEYS_ONLY;
 static ERL_NIF_TERM ATOM_COMPRESSION;
 static ERL_NIF_TERM ATOM_ERROR_DB_REPAIR;
 static ERL_NIF_TERM ATOM_USE_BLOOMFILTER;
+static ERL_NIF_TERM ATOM_GET_VALUE;
 
 static ErlNifFunc nif_funcs[] =
 {
@@ -103,6 +104,7 @@ static ErlNifFunc nif_funcs[] =
     {"async_iterator", 3, eleveldb::async_iterator},
     {"async_iterator", 4, eleveldb::async_iterator},
 
+    {"iterator_value", 1, eleveldb::iterator_value},
     {"async_iterator_move", 3, eleveldb::async_iterator_move}
 };
 
@@ -559,15 +561,7 @@ struct iter_move_task_t : public work_task_t
                     break;
      }
 
-    if(!itr->Valid())
-     return work_result(local_env(), ATOM_ERROR, ATOM_INVALID_ITERATOR);
-
-    if(itr_handle->keys_only)
-     return work_result(local_env(), ATOM_OK, slice_to_binary(local_env(), itr->key()));
-
-    return work_result(local_env(), ATOM_OK, 
-                                    slice_to_binary(local_env(), itr->key()),
-                                    slice_to_binary(local_env(), itr->value()));
+    return work_result(ATOM_GET_VALUE);
  }
 };
 
@@ -1417,6 +1411,30 @@ ERL_NIF_TERM async_iterator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     return ATOM_OK;
 }
 
+ERL_NIF_TERM iterator_value(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+ const ERL_NIF_TERM& itr_handle_ref   = argv[0];
+
+ eleveldb_itr_handle *itr_handle = 0;
+
+ if(!enif_get_resource(env, itr_handle_ref, eleveldb_itr_RESOURCE,
+                       (void **)&itr_handle))
+   return enif_make_badarg(env);
+
+ leveldb::Iterator* itr = itr_handle->itr;
+
+ if(!itr->Valid())
+   return enif_make_tuple2(env, ATOM_ERROR, ATOM_INVALID_ITERATOR);
+
+ if(itr_handle->keys_only)
+   return enif_make_tuple2(env, ATOM_OK, slice_to_binary(env, itr->key()));
+
+ return enif_make_tuple3(env,
+                         ATOM_OK,
+                         slice_to_binary(env, itr->key()),
+                         slice_to_binary(env, itr->value()));
+}
+
 ERL_NIF_TERM async_iterator_move(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
  const ERL_NIF_TERM& caller_ref       = argv[0];
@@ -1824,6 +1842,7 @@ try
     ATOM(ATOM_KEYS_ONLY, "keys_only");
     ATOM(ATOM_COMPRESSION, "compression");
     ATOM(ATOM_USE_BLOOMFILTER, "use_bloomfilter");
+    ATOM(ATOM_GET_VALUE, "get_value");
 
 #undef ATOM
 

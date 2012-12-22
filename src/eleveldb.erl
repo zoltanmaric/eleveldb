@@ -39,6 +39,7 @@
 
 -export([iterator/2,
          iterator_move/2,
+         iterator_value/1,
          iterator_close/1]).
 
 -on_load(init/0).
@@ -207,10 +208,15 @@ iterator_move(_IRef, _Loc) ->
     case async_iterator_move(_CallerRef, _IRef, _Loc) of
     ok ->
         receive
+            { _CallerRef, get_value} ->
+                iterator_value(_IRef);
             { _CallerRef, X}                    -> X
         end;
     ER -> ER
     end.
+
+iterator_value(_IRef) ->
+    erlang:nif_error({error, not_loaded}).
 
 -spec iterator_close(itr_ref()) -> ok.
 iterator_close(IRef) ->
