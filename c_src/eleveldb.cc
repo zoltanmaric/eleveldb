@@ -351,20 +351,18 @@ class work_task_t
  ERL_NIF_TERM   caller_ref_term,
                 caller_pid_term;
 
- private:
+ public:
  ErlNifPid local_pid;   // maintain for task lifetime (JFW)
 
- public:
  work_task_t(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref)
  {
+    enif_self(caller_env, &local_pid);
     local_env_ = enif_alloc_env();
 
     if(0 == local_env_)
      throw std::invalid_argument("work_task_t::local_env_");
 
     caller_ref_term = enif_make_copy(local_env_, caller_ref);
-
-    caller_pid_term = enif_make_pid(local_env_, enif_self(caller_env, &local_pid));
  }
 
  virtual ~work_task_t()
@@ -375,7 +373,6 @@ class work_task_t
  ErlNifEnv *local_env() const           { return local_env_; }
 
  const ERL_NIF_TERM& caller_ref() const { return caller_ref_term; }
- const ERL_NIF_TERM& pid() const        { return caller_pid_term; }
 
  virtual work_result operator()()     = 0;
 };
@@ -997,10 +994,7 @@ bool eleveldb_thread_pool::drain_thread_pool()
 
 bool eleveldb_thread_pool::notify_caller(eleveldb::work_task_t& work_item)
 {
- ErlNifPid pid;
-
- if(0 == enif_get_local_pid(work_item.local_env(), work_item.pid(), &pid))
-  return false;
+ ErlNifPid &pid = work_item.local_pid;
 
  // Call the work function:
  basho::async_nif::work_result result = work_item();
