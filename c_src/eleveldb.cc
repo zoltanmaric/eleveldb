@@ -105,7 +105,7 @@ static ErlNifFunc nif_funcs[] =
     {"async_iterator", 3, eleveldb::async_iterator},
     {"async_iterator", 4, eleveldb::async_iterator},
 
-    {"iterator_value", 1, eleveldb::iterator_value},
+    {"iterator_value", 2, eleveldb::iterator_value},
     {"async_iterator_move", 3, eleveldb::async_iterator_move}
 };
 
@@ -351,6 +351,7 @@ struct eleveldb_itr_handle
     ErlNifMutex* result_lock;
     iterator_result_t result_type;
     bool result_ready;
+    ERL_NIF_TERM result_ref;
 };
 
 void *eleveldb_write_thread_worker(void *args);
@@ -531,6 +532,13 @@ struct iter_move_task_t : public work_task_t
    simple_scoped_lock l(itr_handle->result_lock);
    itr_handle->result_type = result;
    itr_handle->result_ready = true;
+   if(enif_is_ref(local_env_, itr_handle->result_ref)) {
+     // Receiver is waiting on receive, send message
+     ERL_NIF_TERM msg = enif_make_tuple2(itr_handle->result_env,
+                                         itr_handle->result_ref,
+                                         ATOM_OK);
+     enif_send(0, &local_pid, itr_handle->result_env, msg);
+   }
    return work_result(ATOM_NO_MESSAGE);
  }
 
@@ -1441,6 +1449,7 @@ ERL_NIF_TERM async_iterator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 ERL_NIF_TERM iterator_value(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
  const ERL_NIF_TERM& itr_handle_ref   = argv[0];
+ const ERL_NIF_TERM& waiting_ref      = argv[1];
 
  eleveldb_itr_handle *itr_handle = 0;
 
@@ -1452,6 +1461,10 @@ ERL_NIF_TERM iterator_value(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
    simple_scoped_lock l(itr_handle->result_lock);
 
    if(!itr_handle->result_ready) {
+     if(enif_is_ref(env, waiting_ref)) {
+       itr_handle->result_ref = enif_make_copy(itr_handle->result_env,
+                                               waiting_ref);
+     }
      return ATOM_NOT_READY;
    }
 
@@ -1512,6 +1525,7 @@ ERL_NIF_TERM async_iterator_move(ErlNifEnv* env, int argc, const ERL_NIF_TERM ar
  {
    // simple_scoped_lock l(itr_handle->result_lock);
    itr_handle->result_ready = false;
+   itr_handle->result_ref = ATOM_FALSE;
    enif_clear_env(itr_handle->result_env);
  }
 

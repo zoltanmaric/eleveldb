@@ -39,7 +39,7 @@
 
 -export([iterator/2,
          iterator_move/2,
-         iterator_value/1,
+         iterator_value/2,
          iterator_close/1]).
 
 -on_load(init/0).
@@ -210,18 +210,29 @@ iterator_move(_IRef, _Loc) ->
     ER -> ER
     end.
 
-wait_for_value(N, IRef) ->
-    case iterator_value(IRef) of
+wait_for_value(20, IRef) ->
+    Ref = make_ref(),
+    case iterator_value(IRef, Ref) of
         not_ready ->
-            %% erlang:yield(),
-            erlang:bump_reductions(700),
+            receive
+                {Ref, ok} ->
+                    iterator_value(IRef, Ref)
+            end;
+        Value ->
+            Value
+    end;
+wait_for_value(N, IRef) ->
+    case iterator_value(IRef, false) of
+        not_ready ->
+            erlang:yield(),
+            %% erlang:bump_reductions(700),
             wait_for_value(N+1, IRef);
         Value ->
             %% io:format("N: ~p~n", [N]),
             Value
     end.
 
-iterator_value(_IRef) ->
+iterator_value(_IRef, _Ref) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec iterator_close(itr_ref()) -> ok.
