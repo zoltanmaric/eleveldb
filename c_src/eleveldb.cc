@@ -346,30 +346,44 @@ typedef basho::async_nif::work_result   work_result;
 class work_task_t
 {
  protected:
- ErlNifEnv      *local_env_;
+ ErlNifEnv      *local_env_, *caller_env_;
 
  ERL_NIF_TERM   caller_ref_term,
                 caller_pid_term;
 
  private:
  ErlNifPid local_pid;   // maintain for task lifetime (JFW)
+ bool own_local_env;
 
  public:
  work_task_t(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref)
+   : caller_env_(caller_env), caller_ref_term(caller_ref), own_local_env(false)
  {
-    local_env_ = enif_alloc_env();
-
-    if(0 == local_env_)
-     throw std::invalid_argument("work_task_t::local_env_");
-
-    caller_ref_term = enif_make_copy(local_env_, caller_ref);
-
-    caller_pid_term = enif_make_pid(local_env_, enif_self(caller_env, &local_pid));
  }
 
  virtual ~work_task_t()
  {
-    enif_free_env(local_env_);
+    if (own_local_env)
+    {
+       enif_free_env(local_env_);
+    }
+ }
+
+ virtual void set_env(ErlNifEnv* env)
+ {
+    if (0!=env)
+    {
+       enif_clear_env(env);
+       local_env_ = env;
+    }
+    else
+    {
+       local_env_ = enif_alloc_env();
+       own_local_env = true;
+    }
+    caller_ref_term = enif_make_copy(local_env_, caller_ref_term);
+
+    caller_pid_term = enif_make_pid(local_env_, enif_self(caller_env_, &local_pid));
  }
 
  ErlNifEnv *local_env() const           { return local_env_; }
@@ -571,13 +585,19 @@ struct get_task_t : public work_task_t
             leveldb::ReadOptions *_options)
   : work_task_t(_caller_env, _caller_ref),
     db_handle(_db_handle),
-    key_term(enif_make_copy(local_env_, _key_term)),
+    key_term(_key_term),
     options(_options)
  {}
 
  ~get_task_t()
  {
     placement_dtor(options);
+ }
+
+ void set_env(ErlNifEnv* env)
+ {
+    work_task_t::set_env(env);
+    key_term = enif_make_copy(local_env_, key_term);
  }
 
  work_result operator()()
@@ -662,19 +682,19 @@ struct ThreadData
 
     pthread_mutex_t m_Mutex;             //!< mutex for condition variable
     pthread_cond_t m_Condition;          //!< condition for thread waiting
-
+    ErlNifEnv* m_Env;
 
     ThreadData(class eleveldb_thread_pool & Pool)
     : m_ErlTid(NULL), m_Available(0), m_Pool(Pool), m_DirectWork(NULL)
     {
         pthread_mutex_init(&m_Mutex, NULL);
         pthread_cond_init(&m_Condition, NULL);
-
-        return;
+        m_Env = enif_alloc_env();
     }   // ThreadData
 
 private:
     ThreadData();
+    ~ThreadData() { enif_free_env(m_Env); }
 
 };  // class ThreadData
 
@@ -736,6 +756,7 @@ private:
              if (ret_flag)
              {
                  threads[index]->m_DirectWork=work;
+                 if (0!=work) work->set_env(threads[index]->m_Env);
                  pthread_mutex_lock(&threads[index]->m_Mutex);
                  pthread_cond_signal(&threads[index]->m_Condition);
                  pthread_mutex_unlock(&threads[index]->m_Mutex);
@@ -767,6 +788,7 @@ private:
         lock();
          eleveldb::detail::sync_add_and_fetch(&work_queue_atomic, 1);
          work_queue.push_back(item);
+         item->set_env(0);
         unlock();
 
         // to address race condition, thread might be waiting now
