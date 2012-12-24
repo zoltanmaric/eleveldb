@@ -357,7 +357,7 @@ class work_task_t
 
  public:
  work_task_t(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref)
-   : caller_env_(caller_env), caller_ref_term(caller_ref), own_local_env(false)
+     : local_env_(NULL), caller_env_(caller_env), caller_ref_term(caller_ref), own_local_env(false)
  {
  }
 
@@ -371,7 +371,7 @@ class work_task_t
 
  virtual void set_env(ErlNifEnv* env)
  {
-    if (0!=env)
+    if (NULL!=env)
     {
        enif_clear_env(env);
        local_env_ = env;
@@ -507,8 +507,16 @@ struct iter_move_task_t : public work_task_t
    itr_handle_refcount(_itr_handle),
    itr_handle(_itr_handle),
    action(_action),
-   seek_target(enif_make_copy(local_env_, _seek_target))
+   seek_target(_seek_target)
+//   seek_target(enif_make_copy(local_env_, _seek_target))
  {}
+
+ void set_env(ErlNifEnv* env)
+ {
+    work_task_t::set_env(env);
+    seek_target = enif_make_copy(local_env_, seek_target);
+ }
+
 
  work_result operator()()
  {
@@ -566,7 +574,7 @@ struct iter_move_task_t : public work_task_t
     if(itr_handle->keys_only)
      return work_result(local_env(), ATOM_OK, slice_to_binary(local_env(), itr->key()));
 
-    return work_result(local_env(), ATOM_OK, 
+    return work_result(local_env(), ATOM_OK,
                                     slice_to_binary(local_env(), itr->key()),
                                     slice_to_binary(local_env(), itr->value()));
  }
@@ -609,7 +617,7 @@ struct get_task_t : public work_task_t
 
     leveldb::Slice key_slice((const char*)key.data, key.size);
 
-    std::string value; 
+    std::string value;
 
     // We don't want to hold the DB lock through the copy:
     {
@@ -618,7 +626,7 @@ struct get_task_t : public work_task_t
     leveldb::Status status = db_handle->db->Get(*options, key_slice, &value);
 
     if(!status.ok())
-     return work_result(ATOM_NOT_FOUND); 
+     return work_result(ATOM_NOT_FOUND);
     }
 
     ERL_NIF_TERM value_bin;
@@ -756,9 +764,15 @@ private:
              if (ret_flag)
              {
                  threads[index]->m_DirectWork=work;
-                 if (0!=work) work->set_env(threads[index]->m_Env);
+                 if (NULL!=work)
+                     work->set_env(threads[index]->m_Env);
+
+                 // man page says mutex lock optional, experience in
+                 //  this code says it is not.  using broadcast instead
+                 //  of signal to cover one other race condition
+                 //  that should never happen with single thread waiting.
                  pthread_mutex_lock(&threads[index]->m_Mutex);
-                 pthread_cond_signal(&threads[index]->m_Condition);
+                 pthread_cond_broadcast(&threads[index]->m_Condition);
                  pthread_mutex_unlock(&threads[index]->m_Mutex);
              }   // if
          }   // if
@@ -844,6 +858,7 @@ private:
 eleveldb_thread_pool::eleveldb_thread_pool(const size_t thread_pool_size)
   : threads_lock(0),
     work_queue_pending(0), work_queue_lock(0),
+    work_queue_atomic(0),
     shutdown(false)
 {
  threads_lock = enif_mutex_create(const_cast<char *>("threads_lock"));
@@ -1026,14 +1041,14 @@ bool eleveldb_thread_pool::notify_caller(eleveldb::work_task_t& work_item)
 
  // Call the work function:
  basho::async_nif::work_result result = work_item();
- 
+
  /* Assemble a notification of the following form:
         { PID CallerHandle, ERL_NIF_TERM result } */
- ERL_NIF_TERM result_tuple = enif_make_tuple2(work_item.local_env(), 
+ ERL_NIF_TERM result_tuple = enif_make_tuple2(work_item.local_env(),
                               work_item.caller_ref(), result.result());
- 
+
  return (0 != enif_send(0, &pid, work_item.local_env(), result_tuple));
-} 
+}
 
 /* Module-level private data: */
 class eleveldb_priv_data
@@ -1078,19 +1093,27 @@ void *eleveldb_write_thread_worker(void *args)
                 h.unlock();
             }   // if
         }   // if
+        else
+        {
+            // this code path written as "else" in case
+            //  there is some weird race where pthread_cond_wait
+            //  exits against the written rules.  m_DirectWork could
+            //  be set "late" (between "submission=" and "if (NULL==submission)").
+            tdata.m_DirectWork=NULL;
+        }   // else
 
         if (NULL!=submission)
         {
             eleveldb_thread_pool::notify_caller(*submission);
             placement_dtor(submission);
             submission=NULL;
-            tdata.m_DirectWork=NULL;
         }   // if
         else
         {
             pthread_mutex_lock(&tdata.m_Mutex);
             tdata.m_Available=1;
             pthread_cond_wait(&tdata.m_Condition, &tdata.m_Mutex);
+            tdata.m_Available=0;  // safety
             pthread_mutex_unlock(&tdata.m_Mutex);
         }   // else
     }   // while
