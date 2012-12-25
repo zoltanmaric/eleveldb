@@ -367,13 +367,16 @@ class work_task_t
     {
        enif_free_env(local_env_);
     }
+    else
+    {
+       enif_clear_env(local_env_);
+    }
  }
 
  virtual void set_env(ErlNifEnv* env)
  {
     if (NULL!=env)
     {
-       enif_clear_env(env);
        local_env_ = env;
     }
     else
@@ -508,7 +511,6 @@ struct iter_move_task_t : public work_task_t
    itr_handle(_itr_handle),
    action(_action),
    seek_target(_seek_target)
-//   seek_target(enif_make_copy(local_env_, _seek_target))
  {}
 
  void set_env(ErlNifEnv* env)
