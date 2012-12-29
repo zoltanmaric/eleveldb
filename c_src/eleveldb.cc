@@ -43,6 +43,13 @@
 
 #include "detail.hpp"
 
+// #define DBG(X) X
+#define DBG(X)
+
+extern "C" {
+int erts_printf(const char *, ...);
+}
+
 // Atoms (initialized in on_load)
 static ERL_NIF_TERM ATOM_TRUE;
 static ERL_NIF_TERM ATOM_FALSE;
@@ -82,6 +89,7 @@ static ERL_NIF_TERM ATOM_KEYS_ONLY;
 static ERL_NIF_TERM ATOM_COMPRESSION;
 static ERL_NIF_TERM ATOM_ERROR_DB_REPAIR;
 static ERL_NIF_TERM ATOM_USE_BLOOMFILTER;
+static ERL_NIF_TERM ATOM_ASYNC;
 
 static ErlNifFunc nif_funcs[] =
 {
@@ -92,6 +100,8 @@ static ErlNifFunc nif_funcs[] =
     {"repair", 2, eleveldb_repair},
     {"is_empty", 1, eleveldb_is_empty},
 
+    {"get_result", 1, eleveldb::get_result},
+    {"request_message", 2, eleveldb::request_message},
     {"async_open", 3, eleveldb::async_open},
     {"async_write", 4, eleveldb::async_write},
     {"async_get", 4, eleveldb::async_get},
@@ -120,6 +130,58 @@ const size_t N_THREADS_MAX = 32767;
 
 /* Some primitive-yet-useful NIF helpers: */
 namespace {
+
+struct result_t {
+  static ErlNifResourceType* res_type;
+  ErlNifEnv *env;
+  bool ready;
+  ERL_NIF_TERM result;
+  ERL_NIF_TERM ref;
+  ErlNifMutex *mtx;
+
+  static void open_resource_type(ErlNifEnv *env, const ErlNifResourceFlags &flags) {
+    res_type = enif_open_resource_type(env, NULL, "eleveldb_result_resource",
+                                       &result_t::destroy, flags, NULL);
+  }
+
+  static result_t* create() {
+    result_t *res = (result_t*)enif_alloc_resource(res_type, sizeof(result_t));
+    res->env = enif_alloc_env();
+    res->ready = false;
+    res->ref = ATOM_FALSE;
+    res->mtx = enif_mutex_create((char*)"result_lock");
+    return res;
+  }
+
+  static void destroy(ErlNifEnv* env, void* p) {
+    result_t *res = (result_t*)p;
+    enif_free_env(res->env);
+    enif_mutex_destroy(res->mtx);
+  }
+
+  static int get_resource(ErlNifEnv *env, const ERL_NIF_TERM &term, result_t **res) {
+    return enif_get_resource(env, term, res_type, (void**)res);
+  }
+
+  void set(ERL_NIF_TERM rterm) {
+    result = rterm;
+    ready = true;
+  }
+
+  ERL_NIF_TERM term(ErlNifEnv *term_env) {
+    ERL_NIF_TERM eterm = enif_make_resource(term_env, this);
+    enif_release_resource(this);
+    return enif_make_tuple2(term_env, ATOM_ASYNC, eterm);
+  }
+
+  void lock() {
+    enif_mutex_lock(mtx);
+  }
+
+  void unlock() {
+    enif_mutex_unlock(mtx);
+  }
+};
 
 // A relatively unsafe (no ownership semantics) mutex handle; allocates and releases with lifetime:
 class simple_scoped_mutex_handle
@@ -286,6 +348,7 @@ typedef basho::async_nif::work_result   work_result;
 class work_task_t
 {
 public:
+    result_t *result;
 
 protected:
     volatile uint32_t ref_count;                //!< atomic count of users for auto delete
@@ -302,7 +365,7 @@ private:
 
  public:
  work_task_t(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref)
-     : ref_count(0), second_env_(NULL), resubmit_work(false)
+     : result(NULL), ref_count(0), second_env_(NULL), resubmit_work(false)
  {
     local_env_ = enif_alloc_env();
 
@@ -319,8 +382,14 @@ private:
     enif_free_env(local_env_);
     if (NULL!=second_env_)
         enif_free_env(second_env_);
+    if(result)
+      enif_release_resource(result);
  }
 
+ void use_result(result_t *rt) {
+   enif_keep_resource(rt);
+   result = rt;
+ }
 
 void prepare_recycle()
  {
@@ -1045,9 +1114,34 @@ bool eleveldb_thread_pool::notify_caller(eleveldb::work_task_t& work_item)
  {
      /* Assemble a notification of the following form:
         { PID CallerHandle, ERL_NIF_TERM result } */
-     ERL_NIF_TERM result_tuple = enif_make_tuple2(work_item.local_env(),
-                                                  work_item.caller_ref(), result.result());
-
+     ERL_NIF_TERM result_tuple;
+     if(work_item.result) {
+       result_t &res = *work_item.result;
+       res.lock();
+       if(res.ready)
+         erts_printf("BAD. Result already ready!\n");
+       if(res.ref != ATOM_FALSE) {
+         DBG(erts_printf("Have new ref: %T\n", res.ref));
+         result_tuple = enif_make_tuple2(work_item.local_env(),
+                                         enif_make_copy(work_item.local_env(), res.ref),
+                                         result.result());
+         res.ref = ATOM_FALSE;
+       }
+       else {
+         // Directly return result
+         res.result = enif_make_copy(res.env, result.result());
+         res.ready = true;
+         DBG(erts_printf("Direct return: %T :: %p\n", res.result, &res));
+         res.unlock();
+         return true;
+       }
+       res.unlock();
+     }
+     else {
+       result_tuple = enif_make_tuple2(work_item.local_env(),
+                                       work_item.caller_ref(), result.result());
+     }
+     // erts_printf("Sending to %T: %T\n", pid, result_tuple);
      ret_flag=(0 != enif_send(0, &pid, work_item.local_env(), result_tuple));
  }   // if
 
@@ -1360,6 +1454,56 @@ static bool free_db(ErlNifEnv* env, eleveldb_db_handle* db_handle)
 
 namespace eleveldb {
 
+ERL_NIF_TERM get_result(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  result_t *res;
+
+  if(!result_t::get_resource(env, argv[0], &res))
+    return enif_make_badarg(env);
+
+  ERL_NIF_TERM ret;
+
+  res->lock();
+  if(!res->ready) {
+    ret = ATOM_FALSE;
+  }
+  else {
+    ret = enif_make_tuple2(env, ATOM_OK, enif_make_copy(env, res->result));
+  }
+  res->unlock();
+
+  return ret;
+}
+
+ERL_NIF_TERM request_message(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+  const ERL_NIF_TERM &ref = argv[0];
+  const ERL_NIF_TERM &res_term = argv[1];
+  result_t *res;
+
+  if(!enif_is_ref(env, ref) || !result_t::get_resource(env, res_term, &res))
+    return enif_make_badarg(env);
+
+  res->lock();
+  if(res->ready) {
+    ErlNifPid pid;
+    DBG(erts_printf("Result already ready. Sending to self\n"));
+    enif_self(env, &pid);
+    ERL_NIF_TERM msg = enif_make_tuple2(res->env,
+                                        enif_make_copy(res->env, ref),
+                                        res->result);
+    // erts_printf("Sending to self: %T :: %T\n", pid, msg);
+    enif_send(env, &pid, res->env, msg);
+  }
+  else {
+    DBG(erts_printf("waiting on %T\n", ref));
+    res->ref = enif_make_copy(res->env, ref);
+  }
+  res->unlock();
+
+  return ATOM_OK;
+}
+
 ERL_NIF_TERM async_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
  char db_name[4096];
@@ -1377,18 +1521,21 @@ ERL_NIF_TERM async_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
  leveldb::Options *opts = new leveldb::Options;
  fold(env, argv[2], parse_open_option, *opts);
 
+ result_t *result = result_t::create();
  eleveldb::work_task_t *work_item = new eleveldb::open_task_t(
                                         env, caller_ref,
                                         db_name, opts
                                        );
+ work_item->use_result(result);
 
  if(false == priv.thread_pool.submit(work_item))
   {
     delete work_item;
+    enif_release_resource(result);
     return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
   }
 
- return ATOM_OK;
+ return result->term(env);
 }
 
 ERL_NIF_TERM async_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -1414,15 +1561,19 @@ ERL_NIF_TERM async_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
  leveldb::ReadOptions *opts = new leveldb::ReadOptions();
  fold(env, opts_ref, parse_read_option, *opts);
 
+ result_t *result = result_t::create();
  eleveldb::work_task_t *work_item = new eleveldb::get_task_t(
                                         env, caller_ref,
                                         db_handle, key_ref, opts
                                        );
+ work_item->use_result(result);
 
- if(false == priv.thread_pool.submit(work_item))
+ if(false == priv.thread_pool.submit(work_item)) {
+  enif_release_resource(result);
   return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+ }
 
- return ATOM_OK;
+ return result->term(env);
 }
 
 ERL_NIF_TERM async_iterator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -1456,14 +1607,18 @@ ERL_NIF_TERM async_iterator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     // Now-boilerplate setup (we'll consolidate this pattern soon, I hope):
     eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
+    result_t *result = result_t::create();
     eleveldb::work_task_t *work_item = new eleveldb::iter_task_t(
                                             env, caller_ref,
                                             db_handle, keys_only, opts);
+    work_item->use_result(result);
 
-    if(false == priv.thread_pool.submit(work_item))
+    if(false == priv.thread_pool.submit(work_item)) {
+     enif_release_resource(result);
      return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+    }
 
-    return ATOM_OK;
+    return result->term(env);
 }
 
 ERL_NIF_TERM async_iterator_move(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
@@ -1618,15 +1773,19 @@ ERL_NIF_TERM async_write(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     // Increment the refcount on the database handle so it doesn't vanish:
     enif_keep_resource(handle);
 
+    result_t *async_result = result_t::create();
     eleveldb::work_task_t* work_item = new eleveldb::write_task_t(
                                         env, caller_ref,
                                         handle, batch, opts
                                        );
+    work_item->use_result(async_result);
 
-    if(false == priv.thread_pool.submit(work_item))
+    if(false == priv.thread_pool.submit(work_item)) {
+     enif_release_resource(async_result);
      return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+    }
 
-    return ATOM_OK;
+    return async_result->term(env);
 }
 
 } // namespace eleveldb
@@ -1839,6 +1998,8 @@ try
                                                      &eleveldb_itr_resource_cleanup,
                                                      flags, NULL);
 
+    result_t::open_resource_type(env, flags);
+
     /* Gather local initialization data: */
     struct _local
     {
@@ -1933,6 +2094,7 @@ try
     ATOM(ATOM_KEYS_ONLY, "keys_only");
     ATOM(ATOM_COMPRESSION, "compression");
     ATOM(ATOM_USE_BLOOMFILTER, "use_bloomfilter");
+    ATOM(ATOM_ASYNC, "async");
 
 #undef ATOM
 
