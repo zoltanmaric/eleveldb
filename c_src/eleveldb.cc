@@ -117,6 +117,7 @@ using std::nothrow;
 
 static ErlNifResourceType* eleveldb_db_RESOURCE;
 static ErlNifResourceType* eleveldb_itr_RESOURCE;
+static ErlNifResourceType* eleveldb_result_RESOURCE;
 
 struct eleveldb_db_handle;
 struct eleveldb_itr_handle;
@@ -132,7 +133,6 @@ const size_t N_THREADS_MAX = 32767;
 namespace {
 
 struct result_t {
-  static ErlNifResourceType* res_type;
   ErlNifEnv *env;
   bool ready;
   ERL_NIF_TERM result;
@@ -140,12 +140,13 @@ struct result_t {
   ErlNifMutex *mtx;
 
   static void open_resource_type(ErlNifEnv *env, const ErlNifResourceFlags &flags) {
-    res_type = enif_open_resource_type(env, NULL, "eleveldb_result_resource",
-                                       &result_t::destroy, flags, NULL);
+    eleveldb_result_RESOURCE = enif_open_resource_type(env, NULL, "eleveldb_result_resource",
+                                                       &result_t::destroy, flags, NULL);
   }
 
   static result_t* create() {
-    result_t *res = (result_t*)enif_alloc_resource(res_type, sizeof(result_t));
+    result_t *res = (result_t*)enif_alloc_resource(eleveldb_result_RESOURCE,
+                                                   sizeof(result_t));
     res->env = enif_alloc_env();
     res->ready = false;
     res->ref = ATOM_FALSE;
@@ -160,7 +161,7 @@ struct result_t {
   }
 
   static int get_resource(ErlNifEnv *env, const ERL_NIF_TERM &term, result_t **res) {
-    return enif_get_resource(env, term, res_type, (void**)res);
+    return enif_get_resource(env, term, eleveldb_result_RESOURCE, (void**)res);
   }
 
   void set(ERL_NIF_TERM rterm) {
