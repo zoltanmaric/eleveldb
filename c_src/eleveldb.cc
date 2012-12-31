@@ -311,8 +311,7 @@ private:
      throw std::invalid_argument("work_task_t::local_env_");
 
     caller_ref_term = enif_make_copy(local_env_, caller_ref);
-
-    caller_pid_term = enif_make_pid(local_env_, enif_self(caller_env, &local_pid));
+    enif_self(caller_env, &local_pid);
  }
 
  virtual ~work_task_t()
@@ -372,7 +371,7 @@ void prepare_recycle()
  ErlNifEnv *local_env() const           { return local_env_; }
 
  const ERL_NIF_TERM& caller_ref() const { return caller_ref_term; }
- const ERL_NIF_TERM& pid() const        { return caller_pid_term; }
+ const ErlNifPid& pid() const           { return local_pid; }
  bool resubmit() const {return(resubmit_work);}
 
  virtual work_result operator()()     = 0;
@@ -1035,11 +1034,8 @@ bool eleveldb_thread_pool::drain_thread_pool()
 
 bool eleveldb_thread_pool::notify_caller(eleveldb::work_task_t& work_item)
 {
- ErlNifPid pid;
+ const ErlNifPid &pid = work_item.pid();
  bool ret_flag(true);
-
- if(0 == enif_get_local_pid(work_item.local_env(), work_item.pid(), &pid))
-  return false;
 
  // Call the work function:
  basho::async_nif::work_result result = work_item();
