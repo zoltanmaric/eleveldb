@@ -49,6 +49,7 @@ static ERL_NIF_TERM ATOM_FALSE;
 static ERL_NIF_TERM ATOM_OK;
 static ERL_NIF_TERM ATOM_ERROR;
 static ERL_NIF_TERM ATOM_EINVAL;
+static ERL_NIF_TERM ATOM_BADARG;
 static ERL_NIF_TERM ATOM_CREATE_IF_MISSING;
 static ERL_NIF_TERM ATOM_ERROR_IF_EXISTS;
 static ERL_NIF_TERM ATOM_WRITE_BUFFER_SIZE;
@@ -512,7 +513,9 @@ struct iter_move_task_t : public work_task_t
      {
         default:
                     // JFW: note: *not* { ERROR, badarg() } here-- we want the exception:
-                    return work_result(enif_make_badarg(local_env()));
+                    // JDB: note: We can't send an exception as a message. It crashes Erlang.
+                    //            Changing to be {error, badarg}.
+                    return work_result(local_env(), ATOM_ERROR, ATOM_BADARG);
                     break;
 
         case FIRST:
@@ -1360,8 +1363,22 @@ static bool free_db(ErlNifEnv* env, eleveldb_db_handle* db_handle)
 
 namespace eleveldb {
 
+ERL_NIF_TERM send_reply(ErlNifEnv *env, ERL_NIF_TERM ref, ERL_NIF_TERM reply)
+{
+  ErlNifPid pid;
+  ErlNifEnv *msg_env = enif_alloc_env();
+  ERL_NIF_TERM msg = enif_make_tuple2(msg_env,
+                                      enif_make_copy(msg_env, ref),
+                                      enif_make_copy(msg_env, reply));
+  enif_self(env, &pid);
+  enif_send(env, &pid, msg_env, msg);
+  enif_free_env(msg_env);
+  return ATOM_OK;
+}
+
 ERL_NIF_TERM async_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
+ ERL_NIF_TERM caller_ref = argv[0];
  char db_name[4096];
 
  if(!enif_get_string(env, argv[1], db_name, sizeof(db_name), ERL_NIF_LATIN1) ||
@@ -1369,8 +1386,6 @@ ERL_NIF_TERM async_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
   {
     return enif_make_badarg(env);
   }
-
- ERL_NIF_TERM caller_ref = argv[0];
 
  eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
@@ -1385,7 +1400,7 @@ ERL_NIF_TERM async_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
  if(false == priv.thread_pool.submit(work_item))
   {
     delete work_item;
-    return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+    return send_reply(env, caller_ref, enif_make_tuple2(env, ATOM_ERROR, caller_ref));
   }
 
  return ATOM_OK;
@@ -1407,7 +1422,7 @@ ERL_NIF_TERM async_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
   }
 
  if(0 == db_handle->db)
-  return error_einval(env);
+  return send_reply(env, caller_ref, error_einval(env));
 
  eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
@@ -1420,7 +1435,7 @@ ERL_NIF_TERM async_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
                                        );
 
  if(false == priv.thread_pool.submit(work_item))
-  return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+  return send_reply(env, caller_ref, enif_make_tuple2(env, ATOM_ERROR, caller_ref));
 
  return ATOM_OK;
 }
@@ -1444,7 +1459,7 @@ ERL_NIF_TERM async_iterator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     simple_scoped_lock l(db_handle->db_lock);
 
     if(0 == db_handle->db)
-     return error_einval(env);
+     return send_reply(env, caller_ref, error_einval(env));
 
     // Increment references to db_handle for duration of the iterator
     enif_keep_resource(db_handle);
@@ -1461,7 +1476,7 @@ ERL_NIF_TERM async_iterator(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
                                             db_handle, keys_only, opts);
 
     if(false == priv.thread_pool.submit(work_item))
-     return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+     return send_reply(env, caller_ref, enif_make_tuple2(env, ATOM_ERROR, caller_ref));
 
     return ATOM_OK;
 }
@@ -1596,7 +1611,7 @@ ERL_NIF_TERM async_write(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     }
 
     if(0 == handle->db)
-     return error_einval(env);
+     return send_reply(env, caller_ref, error_einval(env));
 
     eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
@@ -1607,9 +1622,10 @@ ERL_NIF_TERM async_write(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     ERL_NIF_TERM result = fold(env, argv[2], write_batch_item, *batch);
     if(ATOM_OK != result)
      {
-        return enif_make_tuple3(env, ATOM_ERROR, caller_ref,
-                                     enif_make_tuple2(env, ATOM_BAD_WRITE_ACTION,
-                                                      result));
+       return send_reply(env, caller_ref,
+                         enif_make_tuple3(env, ATOM_ERROR, caller_ref,
+                                          enif_make_tuple2(env, ATOM_BAD_WRITE_ACTION,
+                                                           result)));
      }
 
     leveldb::WriteOptions* opts = new leveldb::WriteOptions;
@@ -1624,7 +1640,7 @@ ERL_NIF_TERM async_write(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
                                        );
 
     if(false == priv.thread_pool.submit(work_item))
-     return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
+     return send_reply(env, caller_ref, enif_make_tuple2(env, ATOM_ERROR, caller_ref));
 
     return ATOM_OK;
 }
@@ -1898,6 +1914,7 @@ try
     ATOM(ATOM_OK, "ok");
     ATOM(ATOM_ERROR, "error");
     ATOM(ATOM_EINVAL, "einval");
+    ATOM(ATOM_BADARG, "badarg");
     ATOM(ATOM_TRUE, "true");
     ATOM(ATOM_FALSE, "false");
     ATOM(ATOM_CREATE_IF_MISSING, "create_if_missing");
