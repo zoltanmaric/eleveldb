@@ -52,6 +52,13 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+%% This cannot be a separate function. Code must be inline to trigger
+%% Erlang compiler's use of optimized selective receive.
+-define(WAIT_FOR_REPLY(Ref),
+        receive {Ref, Reply} ->
+                Reply
+        end).
+
 -spec init() -> ok | {error, any()}.
 init() ->
     NumWriteThreads = case os:getenv("ELEVELDB_N_WRITE_THREADS") of
@@ -107,7 +114,7 @@ async_open(_CallerRef, _Name, _Opts) ->
 open(Name, Opts) ->
     CallerRef = make_ref(),
     async_open(CallerRef, Name, Opts),
-    wait_for_reply(CallerRef).
+    ?WAIT_FOR_REPLY(CallerRef).
 
 -spec close(db_ref()) -> ok | {error, any()}.
 close(Ref) ->
@@ -128,7 +135,7 @@ async_get(_CallerRef, _Dbh, _Key, _Opts) ->
 get(Dbh, Key, Opts) ->
     CallerRef = make_ref(),
     async_get(CallerRef, Dbh, Key, Opts),
-    wait_for_reply(CallerRef).
+    ?WAIT_FOR_REPLY(CallerRef).
 
 -spec put(db_ref(), binary(), binary(), write_options()) -> ok | {error, any()}.
 put(Ref, Key, Value, Opts) -> write(Ref, [{put, Key, Value}], Opts).
@@ -140,7 +147,7 @@ delete(Ref, Key, Opts) -> write(Ref, [{delete, Key}], Opts).
 write(Ref, Updates, Opts) ->
     CallerRef = make_ref(),
     async_write(CallerRef, Ref, Updates, Opts),
-    wait_for_reply(CallerRef).
+    ?WAIT_FOR_REPLY(CallerRef).
 
 -spec async_write(reference(), db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
 async_write(_CallerRef, _Ref, _Updates, _Opts) ->
@@ -158,13 +165,13 @@ async_iterator(_CallerRef, _Ref, _Opts, keys_only) ->
 iterator(Ref, Opts) ->
     CallerRef = make_ref(),
     async_iterator(CallerRef, Ref, Opts),
-    wait_for_reply(CallerRef).
+    ?WAIT_FOR_REPLY(CallerRef).
 
 -spec iterator(db_ref(), read_options(), keys_only) -> {ok, itr_ref()}.
 iterator(Ref, Opts, keys_only) ->
     CallerRef = make_ref(),
     async_iterator(CallerRef, Ref, Opts, keys_only),
-    wait_for_reply(CallerRef).
+    ?WAIT_FOR_REPLY(CallerRef).
 
 -spec async_iterator_move(reference(), itr_ref(), iterator_action()) -> {reference(), {ok, Key::binary(), Value::binary()}} |
                                                                         {reference(), {ok, Key::binary()}} |
@@ -279,11 +286,6 @@ validate_options(Type, Opts) ->
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
-wait_for_reply(Ref) ->
-    receive {Ref, Reply} ->
-            Reply
-    end.
-
 do_fold(Itr, Fun, Acc0, Opts) ->
     try
         %% Extract {first_key, binary()} and seek to that key as a starting
