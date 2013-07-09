@@ -211,7 +211,8 @@ iterator_close_int(_IRef) ->
 
 %% Fold over the keys and values in the database
 %% will throw an exception if the database is closed while the fold runs
--spec fold(db_ref(), fold_fun(), any(), read_options()) -> any().
+-spec fold(db_ref(), fold_fun(), any(), read_options()) ->
+    {ok, FinalAcc :: any()} | {error, Reason :: any(), PartialAcc :: any()}.
 fold(Ref, Fun, Acc0, Opts) ->
     {ok, Itr} = iterator(Ref, Opts),
     do_fold(Itr, Fun, Acc0, Opts).
@@ -220,7 +221,8 @@ fold(Ref, Fun, Acc0, Opts) ->
 
 %% Fold over the keys in the database
 %% will throw an exception if the database is closed while the fold runs
--spec fold_keys(db_ref(), fold_keys_fun(), any(), read_options()) -> any().
+-spec fold_keys(db_ref(), fold_keys_fun(), any(), read_options()) ->
+    {ok, FinalAcc :: any()} | {error, Reason :: any(), PartialAcc :: any()}.
 fold_keys(Ref, Fun, Acc0, Opts) ->
     {ok, Itr} = iterator(Ref, Opts, keys_only),
     do_fold(Itr, Fun, Acc0, Opts).
@@ -291,27 +293,33 @@ validate_options(Type, Opts) ->
 %% Internal functions
 %% ===================================================================
 do_fold(Itr, Fun, Acc0, Opts) ->
-    try
-        %% Extract {first_key, binary()} and seek to that key as a starting
-        %% point for the iteration. The folding function should use throw if it
-        %% wishes to terminate before the end of the fold.
-        Start = proplists:get_value(first_key, Opts, first),
-        true = is_binary(Start) or (Start == first),
-        fold_loop(iterator_move(Itr, Start), Itr, Fun, Acc0)
-    after
-        iterator_close(Itr)
-    end.
+    %% Extract {first_key, binary()} and seek to that key as a starting
+    %% point for the iteration. The folding function should use throw if it
+    %% wishes to terminate before the end of the fold.
+    Start = proplists:get_value(first_key, Opts, first),
+    true = is_binary(Start) or (Start == first),
+    Res = fold_loop(iterator_move(Itr, Start), Itr, Fun, Acc0),
+    iterator_close(Itr).
 
 fold_loop({error, iterator_closed}, _Itr, _Fun, Acc0) ->
-    throw({iterator_closed, Acc0});
+    {iterator_closed, Acc0};
 fold_loop({error, invalid_iterator}, _Itr, _Fun, Acc0) ->
-    Acc0;
+    {ok, Acc0};
 fold_loop({ok, K}, Itr, Fun, Acc0) ->
-    Acc = Fun(K, Acc0),
-    fold_loop(iterator_move(Itr, next), Itr, Fun, Acc);
+    case Fun(K, Acc0) of
+        {ok, Acc} ->
+            fold_loop(iterator_move(Itr, next), Itr, Fun, Acc);
+        {stopped, Acc} ->
+            {ok, Acc}
+    end;
 fold_loop({ok, K, V}, Itr, Fun, Acc0) ->
-    Acc = Fun({K, V}, Acc0),
-    fold_loop(iterator_move(Itr, next), Itr, Fun, Acc).
+    case Fun({K, V}, Acc0) of
+        {ok, Acc} ->
+            fold_loop(iterator_move(Itr, next), Itr, Fun, Acc);
+        {stopped, Acc} ->
+            {ok, Acc}
+    end.
+
 
 validate_type({_Key, bool}, true)                            -> true;
 validate_type({_Key, bool}, false)                           -> true;
