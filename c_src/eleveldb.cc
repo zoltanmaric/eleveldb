@@ -463,11 +463,11 @@ async_get(
     opts->nonblocking=true;
 
     ErlNifBinary key;
-    enif_inspect_binary(env, key_ref, key);
+    enif_inspect_binary(env, key_ref, &key);
     leveldb::Slice key_slice((const char*)key.data, key.size);
 
     std::string sval;
-    leveldb::Status status = db->Get(opts, key_slice, &sval);
+    leveldb::Status status = db_ptr->m_Db->Get(*opts, key_slice, &sval);
     if (status.ok())
     {
         const size_t size = sval.size();
@@ -481,7 +481,7 @@ async_get(
     {
         eleveldb::WorkTask *work_item = new eleveldb::GetTask(env, caller_ref,
                                                               db_ptr.get(), key_ref, opts);
-        
+
         eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
         if(false == priv.thread_pool.submit(work_item))
