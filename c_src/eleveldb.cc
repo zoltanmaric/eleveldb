@@ -459,6 +459,46 @@ async_get(
     leveldb::ReadOptions *opts = new leveldb::ReadOptions();
     fold(env, opts_ref, parse_read_option, *opts);
 
+#if 1
+    opts->nonblocking=true;
+
+    ErlNifBinary key;
+    enif_inspect_binary(env, key_ref, key);
+    leveldb::Slice key_slice((const char*)key.data, key.size);
+
+    std::string sval;
+    leveldb::Status status = db->Get(opts, key_slice, &sval);
+    if (status.ok())
+    {
+        const size_t size = sval.size();
+        ERL_NIF_TERM value_bin;
+        unsigned char* value = enif_make_new_binary(env, size, &value_bin);
+        memcpy(value, sval.data(), size);
+        delete opts;
+        return enif_make_tuple2(env, ATOM_OK, value_bin);
+    }
+    else if (status.WouldBlock())
+    {
+        eleveldb::WorkTask *work_item = new eleveldb::GetTask(env, caller_ref,
+                                                              db_ptr.get(), key_ref, opts);
+        
+        eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
+
+        if(false == priv.thread_pool.submit(work_item))
+        {
+            delete work_item;
+            return send_reply(env, caller_ref,
+                              enif_make_tuple2(env, eleveldb::ATOM_ERROR, caller_ref));
+        }   // if
+
+        return eleveldb::ATOM_OK;
+    }
+    else
+    {
+        return ATOM_NOT_FOUND;
+    }
+#else
+
     eleveldb::WorkTask *work_item = new eleveldb::GetTask(env, caller_ref,
                                                           db_ptr.get(), key_ref, opts);
 
@@ -472,6 +512,7 @@ async_get(
     }   // if
 
     return eleveldb::ATOM_OK;
+#endif
 
 }   // async_get
 
