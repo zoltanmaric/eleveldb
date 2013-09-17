@@ -454,7 +454,7 @@ async_get(
     }
 
     if(NULL == db_ptr->m_Db)
-        return send_reply(env, caller_ref, error_einval(env));
+        return enif_make_tuple2(env, caller_ref, error_einval(env));
 
     leveldb::ReadOptions *opts = new leveldb::ReadOptions();
     fold(env, opts_ref, parse_read_option, *opts);
@@ -487,11 +487,10 @@ async_get(
         if(false == priv.thread_pool.submit(work_item))
         {
             delete work_item;
-            return send_reply(env, caller_ref,
-                              enif_make_tuple2(env, eleveldb::ATOM_ERROR, caller_ref));
+            return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
         }   // if
 
-        return eleveldb::ATOM_OK;
+        return ATOM_OK;
     }
     else
     {
@@ -507,11 +506,10 @@ async_get(
     if(false == priv.thread_pool.submit(work_item))
     {
         delete work_item;
-        return send_reply(env, caller_ref,
-                          enif_make_tuple2(env, eleveldb::ATOM_ERROR, caller_ref));
+        return enif_make_tuple2(env, ATOM_ERROR, caller_ref);
     }   // if
 
-    return eleveldb::ATOM_OK;
+    return ATOM_OK;
 #endif
 
 }   // async_get

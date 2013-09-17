@@ -2,7 +2,7 @@
 %%
 %%  eleveldb: Erlang Wrapper for LevelDB (http://code.google.com/p/leveldb/)
 %%
-%% Copyright (c) 2010-2012 Basho Technologies, Inc. All Rights Reserved.
+%% Copyright (c) 2010-2013 Basho Technologies, Inc. All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -137,8 +137,10 @@ async_get(_CallerRef, _Dbh, _Key, _Opts) ->
 -spec get(db_ref(), binary(), read_options()) -> {ok, binary()} | not_found | {error, any()}.
 get(Dbh, Key, Opts) ->
     CallerRef = make_ref(),
-    async_get(CallerRef, Dbh, Key, Opts),
-    ?WAIT_FOR_REPLY(CallerRef).
+    case async_get(CallerRef, Dbh, Key, Opts) of
+        ok -> ?WAIT_FOR_REPLY(CallerRef);
+        Else -> Else
+    end.
 
 -spec put(db_ref(), binary(), binary(), write_options()) -> ok | {error, any()}.
 put(Ref, Key, Value, Opts) -> write(Ref, [{put, Key, Value}], Opts).
