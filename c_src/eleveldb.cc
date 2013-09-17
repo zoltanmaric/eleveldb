@@ -475,13 +475,16 @@ async_get(
         unsigned char* value = enif_make_new_binary(env, size, &value_bin);
         memcpy(value, sval.data(), size);
         delete opts;
+        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug1);
         return enif_make_tuple2(env, ATOM_OK, value_bin);
     }
     else if (status.WouldBlock())
     {
+        opts->nonblocking=false;
         eleveldb::WorkTask *work_item = new eleveldb::GetTask(env, caller_ref,
                                                               db_ptr.get(), key_ref, opts);
 
+        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug2);
         eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
         if(false == priv.thread_pool.submit(work_item))
@@ -494,6 +497,8 @@ async_get(
     }
     else
     {
+        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug3);
+        delete opts;
         return ATOM_NOT_FOUND;
     }
 #else
