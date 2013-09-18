@@ -465,15 +465,12 @@ async_get(
     ErlNifBinary key;
     enif_inspect_binary(env, key_ref, &key);
     leveldb::Slice key_slice((const char*)key.data, key.size);
+    ERL_NIF_TERM value_bin;
+    BinaryValue value(env, value_bin);
 
-    std::string sval;
-    leveldb::Status status = db_ptr->m_Db->Get(*opts, key_slice, &sval);
+    leveldb::Status status = db_ptr->m_Db->Get(*opts, key_slice, &value);
     if (status.ok())
     {
-        const size_t size = sval.size();
-        ERL_NIF_TERM value_bin;
-        unsigned char* value = enif_make_new_binary(env, size, &value_bin);
-        memcpy(value, sval.data(), size);
         delete opts;
         leveldb::gPerfCounters->Inc(leveldb::ePerfDebug1);
         return enif_make_tuple2(env, ATOM_OK, value_bin);
