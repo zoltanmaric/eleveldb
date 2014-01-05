@@ -24,11 +24,13 @@
 
 #include <deque>
 #include <vector>
+#include <sched.h>
+
 #include "leveldb/perf_count.h"
 
-#ifndef INCL_MUTEX_H
-    #include "mutex.h"
-#endif
+// leveldb routines
+#include "port/port.h"
+#include "util/mutexlock.h"
 
 #ifndef INCL_ELEVELDB_H
     #include "eleveldb.h"
@@ -43,6 +45,39 @@ const size_t N_THREADS_MAX = 32767;
 struct ThreadData;
 class WorkTask;
 
+class NumaPool
+{
+protected:
+    class eleveldb_thread_pool & m_Parent;
+    cpu_set_t m_CpuSet;
+
+    typedef std::deque<eleveldb::WorkTask*> work_queue_t;
+    typedef std::vector<ThreadData *>   thread_pool_t;
+
+    thread_pool_t  threads;
+    port::Mutex threads_lock;       // protect resizing of the thread pool
+    port::Mutex thread_resize_pool_mutex;
+
+    work_queue_t   work_queue;
+    port::Mutex    work_queue_lock;    // protects access to work_queue
+    port::CondVar  work_queue_pending; // flags job present in the work queue
+    volatile size_t work_queue_atomic;   //!< atomic size to parallel work_queue.size().
+
+
+public:
+    NumaPool(class eleveldb_thread_pool & Parent, const size_t ThreadPoolSize, cpu_set_t Set);
+
+    bool submit(eleveldb::WorkTask* item);
+
+protected:
+    bool FindWaitingThread(eleveldb::WorkTask * work);
+    bool grow_thread_pool(const size_t nthreads);
+    bool drain_thread_pool();
+
+    size_t work_queue_size() const { return work_queue.size(); }
+
+};  // NumaPool
+
 
 class eleveldb_thread_pool
 {
@@ -53,45 +88,23 @@ private:
     eleveldb_thread_pool& operator=(const eleveldb_thread_pool&);  // nocopyassign
 
 protected:
-
-    typedef std::deque<eleveldb::WorkTask*> work_queue_t;
-    // typedef std::stack<ErlNifTid *>            thread_pool_t;
-    typedef std::vector<ThreadData *>   thread_pool_t;
+    NumaPool * m_Pool[2];
+    volatile bool  shutdown;           // should we stop threads and shut down?
 
 private:
-    thread_pool_t  threads;
-    eleveldb::Mutex threads_lock;       // protect resizing of the thread pool
-    eleveldb::Mutex thread_resize_pool_mutex;
-
-    work_queue_t   work_queue;
-    ErlNifCond*    work_queue_pending; // flags job present in the work queue
-    ErlNifMutex*   work_queue_lock;    // protects access to work_queue
-    volatile size_t work_queue_atomic;   //!< atomic size to parallel work_queue.size().
-
-    volatile bool  shutdown;           // should we stop threads and shut down?
 
 public:
     eleveldb_thread_pool(const size_t thread_pool_size);
     ~eleveldb_thread_pool();
 
 public:
-    void lock()                    { enif_mutex_lock(work_queue_lock); }
-    void unlock()                  { enif_mutex_unlock(work_queue_lock); }
-
-    bool FindWaitingThread(eleveldb::WorkTask * work);
 
     bool submit(eleveldb::WorkTask* item);
 
-    bool resize_thread_pool(const size_t n);
-
-    size_t work_queue_size() const { return work_queue.size(); }
     bool shutdown_pending() const  { return shutdown; }
     leveldb::PerformanceCounters * perf() const {return(leveldb::gPerfCounters);};
 
-
 private:
-    bool grow_thread_pool(const size_t nthreads);
-    bool drain_thread_pool();
 
     static bool notify_caller(eleveldb::WorkTask& work_item);
 

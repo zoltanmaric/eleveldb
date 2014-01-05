@@ -58,6 +58,9 @@
 
 #include "detail.hpp"
 
+static int gNumaUserDbCount=0;
+static int gNumaInternalDbCount=0;
+
 static ErlNifFunc nif_funcs[] =
 {
     {"close", 1, eleveldb_close},
@@ -552,6 +555,17 @@ async_open(
     eleveldb::WorkTask *work_item = new eleveldb::OpenTask(env, caller_ref,
                                                               db_name, opts);
 
+    if (opts->is_internal_db)
+    {
+        work_item.m_NumaId=gNumaInternalDbCount & 1;
+        ++gNumaInternalDbCount;
+    }   // if
+    else
+    {
+        work_item.m_NumaId=gNumaUserDbCount & 1;
+        ++gNumaUserDbCount;
+    }   // else
+
     if(false == priv.thread_pool.submit(work_item))
     {
         delete work_item;
@@ -611,6 +625,7 @@ async_write(
     eleveldb::WorkTask* work_item = new eleveldb::WriteTask(env, caller_ref,
                                                             db_ptr.get(), batch, opts);
 
+    work_item->m_NumaId=db_ptr->m_NumaId;
     if(false == priv.thread_pool.submit(work_item))
     {
         delete work_item;
@@ -655,6 +670,7 @@ async_get(
 
     eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
+    work_item->m_NumaId=db_ptr->m_NumaId;
     if(false == priv.thread_pool.submit(work_item))
     {
         delete work_item;
@@ -703,6 +719,7 @@ async_iterator(
     // Now-boilerplate setup (we'll consolidate this pattern soon, I hope):
     eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
+    work_item->m_NumaId=db_ptr->m_NumaId;
     if(false == priv.thread_pool.submit(work_item))
     {
         delete work_item;
@@ -832,6 +849,7 @@ async_iterator_move(
                                            itr_ptr->m_Iter.get(), action);
 
         // prevent deletes during worker loop
+        move_item->m_NumaId=itr_ptr->m_DbPtr->m_NumaId;
         move_item->RefInc();
         itr_ptr->reuse_move=move_item;
 

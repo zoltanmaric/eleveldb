@@ -59,6 +59,7 @@ typedef basho::async_nif::work_result   work_result;
 class WorkTask : public RefObject
 {
 public:
+    int m_NumaId;
 
 protected:
     ReferencePtr<DbObject> m_DbPtr;             //!< access to database, and holds reference

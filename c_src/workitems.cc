@@ -59,7 +59,8 @@ namespace eleveldb {
 
 
 WorkTask::WorkTask(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref)
-    : terms_set(false), resubmit_work(false)
+    : m_NumaId(0),
+    terms_set(false), resubmit_work(false)
 {
     if (NULL!=caller_env)
     {
@@ -162,6 +163,8 @@ OpenTask::operator()()
         return error_tuple(local_env(), ATOM_ERROR_DB_OPEN, status);
 
     db_ptr=DbObject::CreateDbObject(db, open_options);
+
+    db_ptr->m_NumaId=m_NumaId;
 
     // create a resource reference to send erlang
     ERL_NIF_TERM result = enif_make_resource(local_env(), db_ptr);

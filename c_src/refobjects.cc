@@ -183,7 +183,7 @@ ErlRefObject::RefDec()
 
     return(cur_count);
 
-}   // DbObject::RefDec
+}   // ErlRefObject::RefDec
 
 
 
@@ -280,8 +280,9 @@ DbObject::DbObjectResourceCleanup(
 
 DbObject::DbObject(
     leveldb::DB * DbPtr,
-    leveldb::Options * Options)
-    : m_Db(DbPtr), m_DbOptions(Options)
+    leveldb::Options * Options,
+    int NumaId)
+    : m_Db(DbPtr), m_DbOptions(Options), m_NumaId(NumaId)
 {
 }   // DbObject::DbObject
 

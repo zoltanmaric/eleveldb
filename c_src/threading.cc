@@ -20,6 +20,8 @@
 //
 // -------------------------------------------------------------------
 
+#include <numa.h>
+
 #include <sstream>
 #include <stdexcept>
 
@@ -45,7 +47,7 @@ void *eleveldb_write_thread_worker(void *args);
  */
 struct ThreadData
 {
-    ErlNifTid * m_ErlTid;                //!< erlang handle for this thread
+    pthread_t m_Tid;                     //!< pthread id
     volatile uint32_t m_Available;       //!< 1 if thread waiting, using standard type for atomic operation
     class eleveldb_thread_pool & m_Pool; //!< parent pool object
     volatile eleveldb::WorkTask * m_DirectWork; //!< work passed direct to thread
@@ -69,8 +71,28 @@ private:
 };  // class ThreadData
 
 
+NumaPool::NumaPool(
+    eleveldb_thread_pool & Parent,
+    const size_t thread_pool_size,
+    cpu_set_t Set)
+    : m_Parent(Parent), m_CpuSet(Set),
+      work_queue_pending(&work_queue_lock),
+      work_queue_atomic(0)
+{
+    if(false == grow_thread_pool(thread_pool_size))
+        throw std::runtime_error("cannot resize thread pool");
+}
+
+
+NumaPool::~NumaPool()
+{
+    drain_thread_pool();   // all kids out of the pool
+}
+
+
+
 bool                           // returns true if available worker thread found and claimed
-eleveldb_thread_pool::FindWaitingThread(
+NumaPool::FindWaitingThread(
     eleveldb::WorkTask * work) // non-NULL to pass current work directly to a thread,
                                // NULL to potentially nudge an available worker toward backlog queue
  {
@@ -117,10 +139,10 @@ eleveldb_thread_pool::FindWaitingThread(
 
      return(ret_flag);
 
- }   // FindWaitingThread
+ }   // NumaPool::FindWaitingThread
 
 
- bool eleveldb_thread_pool::submit(eleveldb::WorkTask* item)
+ bool NumaPool::submit(eleveldb::WorkTask* item)
  {
      bool ret_flag(false);
 
@@ -158,63 +180,80 @@ eleveldb_thread_pool::FindWaitingThread(
 
      return(ret_flag);
 
- }   // submit
+ }   // NumaPool::submit
 
-  // not clear that this works or is testable
- bool eleveldb_thread_pool::resize_thread_pool(const size_t n)
- {
-     eleveldb::MutexLock l(thread_resize_pool_mutex);
 
-    if(0 == n)
-     return false;
+bool eleveldb_thread_pool::submit(eleveldb::WorkTask* item)
+{
+     bool ret_flag(false);
 
-    if(threads.size() == n)
-     return true; // nothing to do
+     if (NULL!=item)
+     {
+         if (0==item->m_NumaId)
+             ret_flag=m_Pool[0].submit(item);
+         else
+             ret_flag=m_Pool[1].submit(item);
+     }   // if
 
-    // Strictly expanding is less expensive:
-    if(threads.size() < n)
-     return grow_thread_pool(n - threads.size());
+     return(ret_flag);
+}   // eleveldb_thread_pool::submit
 
-    if(false == drain_thread_pool())
-     return false;
-
-    return grow_thread_pool(n);
- }
 
 
 eleveldb_thread_pool::eleveldb_thread_pool(const size_t thread_pool_size)
-    : work_queue_pending(0), work_queue_lock(0),
-      work_queue_atomic(0),
-      shutdown(false)
+    : shutdown(false)
 {
+    cpu_set_t set;
 
-    work_queue_pending = enif_cond_create(const_cast<char *>("work_queue_pending"));
-    if(0 == work_queue_pending)
-        throw std::runtime_error("cannot create condition work_queue_pending");
+    numa_set_preferred(0);
+    CPU_ZERO(set);
+    CPU_SET(0, set);
+    CPU_SET(1, set);
+    CPU_SET(2, set);
+    CPU_SET(3, set);
+    CPU_SET(4, set);
+    CPU_SET(5, set);
+    CPU_SET(12, set);
+    CPU_SET(13, set);
+    CPU_SET(14, set);
+    CPU_SET(15, set);
+    CPU_SET(16, set);
+    CPU_SET(17, set);
+    m_Pool[0]=new NumaPool(this, 37, set);
 
-    work_queue_lock = enif_mutex_create(const_cast<char *>("work_queue_lock"));
-    if(0 == work_queue_lock)
-        throw std::runtime_error("cannot create work_queue_lock");
+    numa_set_preferred(1);
+    CPU_ZERO(set);
+    CPU_SET(6, set);
+    CPU_SET(7, set);
+    CPU_SET(8, set);
+    CPU_SET(9, set);
+    CPU_SET(10, set);
+    CPU_SET(11, set);
+    CPU_SET(18, set);
+    CPU_SET(19, set);
+    CPU_SET(20, set);
+    CPU_SET(21, set);
+    CPU_SET(22, set);
+    CPU_SET(23, set);
+    m_Pool[1]=new NumaPool(this, 37, set);
 
-    if(false == grow_thread_pool(thread_pool_size))
-        throw std::runtime_error("cannot resize thread pool");
+    numa_set_preferred(-1);
+    numa_set_localalloc();  // this should be redundant to numa_set_preferred(-1)
 }
 
 eleveldb_thread_pool::~eleveldb_thread_pool()
 {
-    drain_thread_pool();   // all kids out of the pool
-
-    enif_mutex_destroy(work_queue_lock);
-    enif_cond_destroy(work_queue_pending);
-
+    delete m_Pool[];
 }
 
 // Grow the thread pool by nthreads threads:
 //  may not work at this time ...
-bool eleveldb_thread_pool::grow_thread_pool(const size_t nthreads)
+bool NumaPool::grow_thread_pool(const size_t nthreads)
 {
-    eleveldb::MutexLock l(threads_lock);
+    leveldb::MutexLock l(threads_lock);
     ThreadData * new_thread;
+    int ret_val;
+    bool ret_flag=true;
 
     if(0 >= nthreads)
         return true;  // nothing to do, but also not failure
@@ -227,30 +266,22 @@ bool eleveldb_thread_pool::grow_thread_pool(const size_t nthreads)
 
     threads.reserve(nthreads);
 
-    for(size_t i = nthreads; i; --i)
+    for(size_t i = nthreads; i && ret_flag; --i)
     {
-        std::ostringstream thread_name;
-        thread_name << "eleveldb_write_thread_" << threads.size() + 1;
-
-        ErlNifTid *thread_id = static_cast<ErlNifTid *>(enif_alloc(sizeof(ErlNifTid)));
-
-        if(0 == thread_id)
-            return false;
-
         new_thread=new ThreadData(*this);
 
-        const int result = enif_thread_create(const_cast<char *>(thread_name.str().c_str()), thread_id,
-                                              eleveldb_write_thread_worker,
-                                              static_cast<void *>(new_thread),
-                                              0);
+        ret_val=pthread_create(&new_thread->m_Tid, NULL, eleveldb_write_thread_worker, 
+                               static_cast<void *>(new_thread));
 
-        new_thread->m_ErlTid=thread_id;
-
-        if(0 != result)
-            return false;
-
-
-        threads.push_back(new_thread);
+        if (0==ret_val)
+        {
+            pthread_setaffinity_np(new_thread->m_Tid, sizeof(m_CpuSet), m_CpuSet);
+            threads.push_back(new_thread);
+        }
+        else
+        {
+            ret_flag=false;
+        }   // else
     }
 
     return true;
@@ -269,12 +300,10 @@ bool eleveldb_thread_pool::drain_thread_pool()
             : state(true)
             {}
 
-        void operator()(ErlNifTid*& tid)
+        void operator()(pthread_t tid)
             {
-                if(0 != enif_thread_join(*tid, 0))
+                if(0 != pthread_join(tid, NULL))
                     state = false;
-
-                enif_free(tid);
             }
 
         bool operator()() const { return state; }
@@ -282,7 +311,7 @@ bool eleveldb_thread_pool::drain_thread_pool()
 
     // Signal shutdown and raise all threads:
     shutdown = true;
-    enif_cond_broadcast(work_queue_pending);
+    work_queue_pending.Broadcast();
 
     eleveldb::MutexLock l(threads_lock);
 #if 0

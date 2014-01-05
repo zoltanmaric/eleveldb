@@ -183,6 +183,8 @@ public:
     Mutex m_ItrMutex;                         //!< mutex protecting m_ItrList
     std::list<class ItrObject *> m_ItrList;   //!< ItrObjects holding ref count to this
 
+    int m_NumaId;
+
 protected:
     static ErlNifResourceType* m_Db_RESOURCE;
 
