@@ -29,8 +29,9 @@
 #include "leveldb/perf_count.h"
 
 // leveldb routines
-#include "port/port.h"
-#include "util/mutexlock.h"
+#define LEVELDB_PLATFORM_POSIX 1
+#include "leveldb/port/port.h"
+#include "leveldb/util/mutexlock.h"
 
 #ifndef INCL_ELEVELDB_H
     #include "eleveldb.h"
@@ -48,6 +49,7 @@ class WorkTask;
 class NumaPool
 {
 protected:
+public:  // ThreadData access directly
     class eleveldb_thread_pool & m_Parent;
     cpu_set_t m_CpuSet;
 
@@ -55,17 +57,17 @@ protected:
     typedef std::vector<ThreadData *>   thread_pool_t;
 
     thread_pool_t  threads;
-    port::Mutex threads_lock;       // protect resizing of the thread pool
-    port::Mutex thread_resize_pool_mutex;
+    leveldb::port::Mutex threads_lock;       // protect resizing of the thread pool
+    leveldb::port::Mutex thread_resize_pool_mutex;
 
     work_queue_t   work_queue;
-    port::Mutex    work_queue_lock;    // protects access to work_queue
-    port::CondVar  work_queue_pending; // flags job present in the work queue
+    leveldb::port::Mutex    work_queue_lock;    // protects access to work_queue
+    leveldb::port::CondVar  work_queue_pending; // flags job present in the work queue
     volatile size_t work_queue_atomic;   //!< atomic size to parallel work_queue.size().
-
 
 public:
     NumaPool(class eleveldb_thread_pool & Parent, const size_t ThreadPoolSize, cpu_set_t Set);
+    ~NumaPool();
 
     bool submit(eleveldb::WorkTask* item);
 
@@ -87,7 +89,7 @@ private:
     eleveldb_thread_pool(const eleveldb_thread_pool&);             // nocopy
     eleveldb_thread_pool& operator=(const eleveldb_thread_pool&);  // nocopyassign
 
-protected:
+public:
     NumaPool * m_Pool[2];
     volatile bool  shutdown;           // should we stop threads and shut down?
 

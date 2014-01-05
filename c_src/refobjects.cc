@@ -212,7 +212,8 @@ DbObject::CreateDbObjectType(
 DbObject *
 DbObject::CreateDbObject(
     leveldb::DB * Db,
-    leveldb::Options * DbOptions)
+    leveldb::Options * DbOptions,
+    int NumaId)
 {
     DbObject * ret_ptr;
     void * alloc_ptr;
@@ -220,7 +221,7 @@ DbObject::CreateDbObject(
     // the alloc call initializes the reference count to "one"
     alloc_ptr=enif_alloc_resource(m_Db_RESOURCE, sizeof(DbObject));
 
-    ret_ptr=new (alloc_ptr) DbObject(Db, DbOptions);
+    ret_ptr=new (alloc_ptr) DbObject(Db, DbOptions, NumaId);
 
     // manual reference increase to keep active until "close" called
     //  only inc local counter, leave erl ref count alone ... will force

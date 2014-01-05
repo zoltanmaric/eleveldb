@@ -43,6 +43,8 @@
     #include "atoms.h"
 #endif
 
+#include "mutex.h"
+
 
 namespace eleveldb {
 
@@ -189,7 +191,7 @@ protected:
     static ErlNifResourceType* m_Db_RESOURCE;
 
 public:
-    DbObject(leveldb::DB * DbPtr, leveldb::Options * Options);
+    DbObject(leveldb::DB * DbPtr, leveldb::Options * Options, int NumaId);
 
     virtual ~DbObject();
 
@@ -202,7 +204,7 @@ public:
 
     static void CreateDbObjectType(ErlNifEnv * Env);
 
-    static DbObject * CreateDbObject(leveldb::DB * Db, leveldb::Options * DbOptions);
+    static DbObject * CreateDbObject(leveldb::DB * Db, leveldb::Options * DbOptions, int NumaId);
 
     static DbObject * RetrieveDbObject(ErlNifEnv * Env, const ERL_NIF_TERM & DbTerm);
 

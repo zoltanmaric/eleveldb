@@ -557,12 +557,12 @@ async_open(
 
     if (opts->is_internal_db)
     {
-        work_item.m_NumaId=gNumaInternalDbCount & 1;
+        work_item->m_NumaId=gNumaInternalDbCount & 1;
         ++gNumaInternalDbCount;
     }   // if
     else
     {
-        work_item.m_NumaId=gNumaUserDbCount & 1;
+        work_item->m_NumaId=gNumaUserDbCount & 1;
         ++gNumaUserDbCount;
     }   // else
 

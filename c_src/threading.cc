@@ -49,15 +49,15 @@ struct ThreadData
 {
     pthread_t m_Tid;                     //!< pthread id
     volatile uint32_t m_Available;       //!< 1 if thread waiting, using standard type for atomic operation
-    class eleveldb_thread_pool & m_Pool; //!< parent pool object
+    class NumaPool & m_Pool; //!< parent pool object
     volatile eleveldb::WorkTask * m_DirectWork; //!< work passed direct to thread
 
     pthread_mutex_t m_Mutex;             //!< mutex for condition variable
     pthread_cond_t m_Condition;          //!< condition for thread waiting
 
 
-    ThreadData(class eleveldb_thread_pool & Pool)
-    : m_ErlTid(NULL), m_Available(0), m_Pool(Pool), m_DirectWork(NULL)
+    ThreadData(class NumaPool & Pool)
+    :  m_Available(0), m_Pool(Pool), m_DirectWork(NULL)
     {
         pthread_mutex_init(&m_Mutex, NULL);
         pthread_cond_init(&m_Condition, NULL);
@@ -150,7 +150,7 @@ NumaPool::FindWaitingThread(
      {
          item->RefInc();
 
-         if(shutdown_pending())
+         if(m_Parent.shutdown_pending())
          {
              item->RefDec();
              ret_flag=false;
@@ -160,20 +160,21 @@ NumaPool::FindWaitingThread(
          else if (!FindWaitingThread(item))
          {
              // no waiting threads, put on backlog queue
-             lock();
-             eleveldb::inc_and_fetch(&work_queue_atomic);
-             work_queue.push_back(item);
-             unlock();
+             {
+                 leveldb::MutexLock lock(&work_queue_lock);
+                 eleveldb::inc_and_fetch(&work_queue_atomic);
+                 work_queue.push_back(item);
+             }
 
              // to address race condition, thread might be waiting now
              FindWaitingThread(NULL);
 
-             perf()->Inc(leveldb::ePerfElevelQueued);
+             m_Parent.perf()->Inc(leveldb::ePerfElevelQueued);
              ret_flag=true;
          }   // if
          else
          {
-             perf()->Inc(leveldb::ePerfElevelDirect);
+             m_Parent.perf()->Inc(leveldb::ePerfElevelDirect);
              ret_flag=true;
          }   // else
      }   // if
@@ -190,9 +191,9 @@ bool eleveldb_thread_pool::submit(eleveldb::WorkTask* item)
      if (NULL!=item)
      {
          if (0==item->m_NumaId)
-             ret_flag=m_Pool[0].submit(item);
+             ret_flag=m_Pool[0]->submit(item);
          else
-             ret_flag=m_Pool[1].submit(item);
+             ret_flag=m_Pool[1]->submit(item);
      }   // if
 
      return(ret_flag);
@@ -205,37 +206,40 @@ eleveldb_thread_pool::eleveldb_thread_pool(const size_t thread_pool_size)
 {
     cpu_set_t set;
 
+    // At least one thread means that we don't shut threads down:
+    shutdown = false;
+
     numa_set_preferred(0);
-    CPU_ZERO(set);
-    CPU_SET(0, set);
-    CPU_SET(1, set);
-    CPU_SET(2, set);
-    CPU_SET(3, set);
-    CPU_SET(4, set);
-    CPU_SET(5, set);
-    CPU_SET(12, set);
-    CPU_SET(13, set);
-    CPU_SET(14, set);
-    CPU_SET(15, set);
-    CPU_SET(16, set);
-    CPU_SET(17, set);
-    m_Pool[0]=new NumaPool(this, 37, set);
+    CPU_ZERO(&set);
+    CPU_SET(0, &set);
+    CPU_SET(1, &set);
+    CPU_SET(2, &set);
+    CPU_SET(3, &set);
+    CPU_SET(4, &set);
+    CPU_SET(5, &set);
+    CPU_SET(12, &set);
+    CPU_SET(13, &set);
+    CPU_SET(14, &set);
+    CPU_SET(15, &set);
+    CPU_SET(16, &set);
+    CPU_SET(17, &set);
+    m_Pool[0]=new NumaPool(*this, 37, set);
 
     numa_set_preferred(1);
-    CPU_ZERO(set);
-    CPU_SET(6, set);
-    CPU_SET(7, set);
-    CPU_SET(8, set);
-    CPU_SET(9, set);
-    CPU_SET(10, set);
-    CPU_SET(11, set);
-    CPU_SET(18, set);
-    CPU_SET(19, set);
-    CPU_SET(20, set);
-    CPU_SET(21, set);
-    CPU_SET(22, set);
-    CPU_SET(23, set);
-    m_Pool[1]=new NumaPool(this, 37, set);
+    CPU_ZERO(&set);
+    CPU_SET(6, &set);
+    CPU_SET(7, &set);
+    CPU_SET(8, &set);
+    CPU_SET(9, &set);
+    CPU_SET(10, &set);
+    CPU_SET(11, &set);
+    CPU_SET(18, &set);
+    CPU_SET(19, &set);
+    CPU_SET(20, &set);
+    CPU_SET(21, &set);
+    CPU_SET(22, &set);
+    CPU_SET(23, &set);
+    m_Pool[1]=new NumaPool(*this, 37, set);
 
     numa_set_preferred(-1);
     numa_set_localalloc();  // this should be redundant to numa_set_preferred(-1)
@@ -243,14 +247,15 @@ eleveldb_thread_pool::eleveldb_thread_pool(const size_t thread_pool_size)
 
 eleveldb_thread_pool::~eleveldb_thread_pool()
 {
-    delete m_Pool[];
+    delete m_Pool[0];
+    delete m_Pool[1];
 }
 
 // Grow the thread pool by nthreads threads:
 //  may not work at this time ...
 bool NumaPool::grow_thread_pool(const size_t nthreads)
 {
-    leveldb::MutexLock l(threads_lock);
+    leveldb::MutexLock l(&threads_lock);
     ThreadData * new_thread;
     int ret_val;
     bool ret_flag=true;
@@ -261,8 +266,6 @@ bool NumaPool::grow_thread_pool(const size_t nthreads)
     if(N_THREADS_MAX < nthreads + threads.size())
         return false;
 
-    // At least one thread means that we don't shut threads down:
-    shutdown = false;
 
     threads.reserve(nthreads);
 
@@ -270,12 +273,12 @@ bool NumaPool::grow_thread_pool(const size_t nthreads)
     {
         new_thread=new ThreadData(*this);
 
-        ret_val=pthread_create(&new_thread->m_Tid, NULL, eleveldb_write_thread_worker, 
+        ret_val=pthread_create(&new_thread->m_Tid, NULL, eleveldb_write_thread_worker,
                                static_cast<void *>(new_thread));
 
         if (0==ret_val)
         {
-            pthread_setaffinity_np(new_thread->m_Tid, sizeof(m_CpuSet), m_CpuSet);
+            pthread_setaffinity_np(new_thread->m_Tid, sizeof(m_CpuSet), &m_CpuSet);
             threads.push_back(new_thread);
         }
         else
@@ -290,7 +293,7 @@ bool NumaPool::grow_thread_pool(const size_t nthreads)
 
 // Shut down and destroy all threads in the thread pool:
 //   does not currently work
-bool eleveldb_thread_pool::drain_thread_pool()
+bool NumaPool::drain_thread_pool()
 {
     struct release_thread
     {
@@ -310,10 +313,10 @@ bool eleveldb_thread_pool::drain_thread_pool()
     } rt;
 
     // Signal shutdown and raise all threads:
-    shutdown = true;
-    work_queue_pending.Broadcast();
+    m_Parent.shutdown = true;
+    work_queue_pending.SignalAll();
 
-    eleveldb::MutexLock l(threads_lock);
+    leveldb::MutexLock l(&threads_lock);
 #if 0
     while(!threads.empty())
     {
@@ -366,12 +369,12 @@ bool eleveldb_thread_pool::notify_caller(eleveldb::WorkTask& work_item)
 void *eleveldb_write_thread_worker(void *args)
 {
     ThreadData &tdata = *(ThreadData *)args;
-    eleveldb_thread_pool& h = tdata.m_Pool;
+    NumaPool& h = tdata.m_Pool;
     eleveldb::WorkTask * submission;
 
     submission=NULL;
 
-    while(!h.shutdown)
+    while(!h.m_Parent.shutdown)
     {
         // is work assigned yet?
         //  check backlog work queue if not
@@ -381,16 +384,14 @@ void *eleveldb_write_thread_worker(void *args)
             if (0!=h.work_queue_atomic)
             {
                 // retest with locking
-                h.lock();
+                leveldb::MutexLock lock(&h.work_queue_lock);
                 if (!h.work_queue.empty())
                 {
                     submission=h.work_queue.front();
                     h.work_queue.pop_front();
                     eleveldb::dec_and_fetch(&h.work_queue_atomic);
-                    h.perf()->Inc(leveldb::ePerfElevelDequeued);
+                    h.m_Parent.perf()->Inc(leveldb::ePerfElevelDequeued);
                 }   // if
-
-                h.unlock();
             }   // if
         }   // if
 
