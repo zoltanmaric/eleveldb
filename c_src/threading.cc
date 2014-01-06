@@ -191,12 +191,19 @@ bool eleveldb_thread_pool::submit(eleveldb::WorkTask* item)
      if (NULL!=item)
      {
          if (0==item->m_NumaId)
+         {
              ret_flag=m_Pool[0]->submit(item);
+             perf()->Inc(leveldb::ePerfDebug1);
+         }   // if
          else
+         {
              ret_flag=m_Pool[1]->submit(item);
+             perf()->Inc(leveldb::ePerfDebug2);
+         }   // else
      }   // if
 
      return(ret_flag);
+
 }   // eleveldb_thread_pool::submit
 
 
