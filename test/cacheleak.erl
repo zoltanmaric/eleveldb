@@ -27,7 +27,7 @@
 
 cacheleak_test_() ->
     {timeout, 10*60, fun() ->
-                              [] = os:cmd("rm -rf /tmp/eleveldb.cacheleak.test"),
+                              eleveldb:del_dir("/tmp/eleveldb.cacheleak.test"),
                               Blobs = [{<<I:128/unsigned>>, compressible_bytes(10240)} ||
                                           I <- lists:seq(1, 10000)],
                               cacheleak_loop(10, Blobs, 500000)
@@ -67,7 +67,7 @@ cacheleak_loop(Count, Blobs, MaxFinalRSS) ->
     cacheleak_loop(Count-1, Blobs, MaxFinalRSS).
 
 rssmem() ->
-    Cmd = io_lib:format("ps -o rss= -p ~s", [os:getpid()]),
+    Cmd = io_lib:format("ps -o rss= -p ~s 2> /dev/null", [os:getpid()]),
     S = string:strip(os:cmd(Cmd), both),
     case string:to_integer(S) of
         {error, _} ->

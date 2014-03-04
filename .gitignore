@@ -1,6 +1,6 @@
 .eunit/*
 deps/*
-priv/*
+priv/*.so
 *.o
 *.beam
 ebin
