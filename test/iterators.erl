@@ -43,7 +43,7 @@ iterator_test_() ->
     }.
 
 setup() ->
-    os:cmd("rm -rf ltest"),  % NOTE
+    eleveldb:del_dir("ltest"),  % NOTE
     {ok, Ref} = eleveldb:open("ltest", [{create_if_missing, true}]),
     eleveldb:put(Ref, <<"a">>, <<"w">>, []),
     eleveldb:put(Ref, <<"b">>, <<"x">>, []),

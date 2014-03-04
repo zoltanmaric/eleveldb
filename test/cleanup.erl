@@ -146,6 +146,7 @@ check() ->
     ok.
 
 open() ->
+    eleveldb:del_dir(?COMMON_INSTANCE_DIR),
     {ok, Ref} = eleveldb:open(?COMMON_INSTANCE_DIR,
                               [{create_if_missing, true}]),
     Ref.
