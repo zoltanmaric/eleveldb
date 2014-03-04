@@ -170,7 +170,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_access_path", "\"-unused-arg-\""},
-                               {"random", "always", "100"}]
+                               {"random", "always", "0"}]
      },
      #fi{	% both?/OS X version
          name = "stat",
@@ -178,7 +178,7 @@ typedef struct {
          intercept_args = "const char *path, struct stat *buf",
          intercept_args_call = "path, buf",
          c_headers = ["<sys/stat.h>"],
-         intercept_errno = "EFAULT",
+         intercept_errno = "EIO",
          intercept_return_type = "int",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
@@ -268,7 +268,7 @@ typedef struct {
          intercept_args = "int fd, void *buf, size_t nbyte, off_t offset",
          intercept_args_call = "fd, buf, nbyte, offset",
          c_headers = ["<unistd.h>"],
-         intercept_errno = "EBADF",
+         intercept_errno = "EIO",
          intercept_return_type = "ssize_t",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
@@ -285,7 +285,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_unlink_path", "\"-unused-arg-\""},
-                               {"random", "always", "100"}]
+                               {"random", "always", "0"}]
      },
      #fi{
          name = "unlinkat",	% Linux 3.2 version
@@ -298,6 +298,6 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_unlinkat_path", "\"-unused-arg-\""},
-                               {"random", "always", "100"}]
+                               {"random", "always", "0"}]
      }
     ].
