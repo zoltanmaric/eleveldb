@@ -14,6 +14,12 @@ rm-deps:
 compile: deps
 	${REBAR} compile
 
+test: compile_scenarios
+
+compile_scenarios:
+	-mkdir -p .eunit
+	erlc -o deps/faulterl/ebin -I deps/faulterl/include priv/scenario/*erl
+
 clean:
 	${REBAR} clean
 

@@ -367,9 +367,32 @@ validate_type(_, _)                                          -> false.
 %% ===================================================================
 -ifdef(TEST).
 
+del_dir(Dir) ->
+    %% BeEnabled = 0,
+    %% BeVerbose = 0,
+    BeEnabled = 1,
+    BeVerbose = 0,
+    faulterl_nif:poke("bc_fi_enabled", 0, <<0:8>>, false),
+    io:format(user, "DEL_DIR ~s\n", [Dir]),
+    _ = os:cmd("rm -rf " ++ Dir),
+    faulterl_nif:poke("bc_fi_enabled", 0, <<BeEnabled:8>>, false),
+    faulterl_nif:poke("bc_fi_verbose", 0, <<BeVerbose:8>>, false),
+
+    faulterl_nif:poke("bc_fi_random_verbose", 0, <<0:8>>, false),
+
+    %% faulterl_nif:poke("bc_fi_random_verbose", 0, <<1:8>>, false),
+    %% random:seed(now()),
+    %% Rand = random:uniform(1 bsl 27),
+    %% Last seeds, hrm, at 87th iter: 648289540, 3600158722, 66555904
+    %% Rand = 66555904,
+    %% faulterl_nif:poke("bc_fi_random_seed", 0, <<Rand:32>>, false),
+    %% faulterl_nif:poke("bc_fi_random_reseed", 0, <<1:8>>, false),
+
+    ok.
+
 open_test() -> [{open_test_Z(), l} || l <- lists:seq(1, 20)].
 open_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.open.test"),
+    del_dir("/tmp/eleveldb.open.test"),
     {ok, Ref} = open("/tmp/eleveldb.open.test", [{create_if_missing, true}]),
     ok = ?MODULE:put(Ref, <<"abc">>, <<"123">>, []),
     {ok, <<"123">>} = ?MODULE:get(Ref, <<"abc">>, []),
@@ -377,7 +400,7 @@ open_test_Z() ->
 
 fold_test() -> [{fold_test_Z(), l} || l <- lists:seq(1, 20)].
 fold_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.fold.test"),
+    del_dir("/tmp/eleveldb.fold.test"),
     {ok, Ref} = open("/tmp/eleveldb.fold.test", [{create_if_missing, true}]),
     ok = ?MODULE:put(Ref, <<"def">>, <<"456">>, []),
     ok = ?MODULE:put(Ref, <<"abc">>, <<"123">>, []),
@@ -389,7 +412,7 @@ fold_test_Z() ->
 
 fold_keys_test() -> [{fold_keys_test_Z(), l} || l <- lists:seq(1, 20)].
 fold_keys_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.fold.keys.test"),
+    del_dir("/tmp/eleveldb.fold.keys.test"),
     {ok, Ref} = open("/tmp/eleveldb.fold.keys.test", [{create_if_missing, true}]),
     ok = ?MODULE:put(Ref, <<"def">>, <<"456">>, []),
     ok = ?MODULE:put(Ref, <<"abc">>, <<"123">>, []),
@@ -400,7 +423,7 @@ fold_keys_test_Z() ->
 
 fold_from_key_test() -> [{fold_from_key_test_Z(), l} || l <- lists:seq(1, 20)].
 fold_from_key_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.fold.fromkeys.test"),
+    del_dir("/tmp/eleveldb.fold.fromkeys.test"),
     {ok, Ref} = open("/tmp/eleveldb.fromfold.keys.test", [{create_if_missing, true}]),
     ok = ?MODULE:put(Ref, <<"def">>, <<"456">>, []),
     ok = ?MODULE:put(Ref, <<"abc">>, <<"123">>, []),
@@ -411,7 +434,7 @@ fold_from_key_test_Z() ->
 
 destroy_test() -> [{destroy_test_Z(), l} || l <- lists:seq(1, 20)].
 destroy_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.destroy.test"),
+    del_dir("/tmp/eleveldb.destroy.test"),
     {ok, Ref} = open("/tmp/eleveldb.destroy.test", [{create_if_missing, true}]),
     ok = ?MODULE:put(Ref, <<"def">>, <<"456">>, []),
     {ok, <<"456">>} = ?MODULE:get(Ref, <<"def">>, []),
@@ -422,7 +445,7 @@ destroy_test_Z() ->
 compression_test() -> [{compression_test_Z(), l} || l <- lists:seq(1, 20)].
 compression_test_Z() ->
     CompressibleData = list_to_binary([0 || _X <- lists:seq(1,20)]),
-    os:cmd("rm -rf /tmp/eleveldb.compress.0 /tmp/eleveldb.compress.1"),
+    del_dir("/tmp/eleveldb.compress.0 /tmp/eleveldb.compress.1"),
     {ok, Ref0} = open("/tmp/eleveldb.compress.0", [{write_buffer_size, 5},
                                                    {create_if_missing, true},
                                                    {compression, false}]),
@@ -450,14 +473,14 @@ compression_test_Z() ->
 
 close_test() -> [{close_test_Z(), l} || l <- lists:seq(1, 20)].
 close_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.close.test"),
+    del_dir("/tmp/eleveldb.close.test"),
     {ok, Ref} = open("/tmp/eleveldb.close.test", [{create_if_missing, true}]),
     ?assertEqual(ok, close(Ref)),
     ?assertEqual({error, einval}, close(Ref)).
 
 close_fold_test() -> [{close_fold_test_Z(), l} || l <- lists:seq(1, 20)].
 close_fold_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.close_fold.test"),
+    del_dir("/tmp/eleveldb.close_fold.test"),
     {ok, Ref} = open("/tmp/eleveldb.close_fold.test", [{create_if_missing, true}]),
     ok = eleveldb:put(Ref, <<"k">>,<<"v">>,[]),
     ?assertException(throw, {iterator_closed, ok}, % ok is returned by close as the acc
@@ -490,7 +513,7 @@ prop_put_delete() ->
     ?LET({Keys, Values}, {keys(), values()},
          ?FORALL(Ops, eqc_gen:non_empty(list(ops(Keys, Values))),
                  begin
-                     ?cmd("rm -rf /tmp/eleveldb.putdelete.qc"),
+                     _ = del_dir("/tmp/eleveldb.putdelete.qc"),
                      {ok, Ref} = eleveldb:open("/tmp/eleveldb.putdelete.qc",
                                                 [{create_if_missing, true}]),
                      Model = apply_kv_ops(Ops, Ref, []),
