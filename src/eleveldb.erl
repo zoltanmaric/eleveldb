@@ -373,7 +373,6 @@ del_dir(Dir) ->
     BeEnabled = 1,
     BeVerbose = 0,
     faulterl_nif:poke("bc_fi_enabled", 0, <<0:8>>, false),
-    io:format(user, "DEL_DIR ~s\n", [Dir]),
     _ = os:cmd("rm -rf " ++ Dir),
     faulterl_nif:poke("bc_fi_enabled", 0, <<BeEnabled:8>>, false),
     faulterl_nif:poke("bc_fi_verbose", 0, <<BeVerbose:8>>, false),
