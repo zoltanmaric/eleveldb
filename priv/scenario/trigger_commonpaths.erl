@@ -134,7 +134,8 @@ typedef struct {
          InterceptName, PathC_TBody,
          InterceptName, "path") || InterceptName <- ["access", "stat",
                                                      "open",
-                                                     "unlink", "unlinkat"]]
+                                                     "unlink", "unlinkat",
+                                                     "rename"]]
     ++
     [trigger_args_of_intercept:config(
          BitC_CHeaders, [], [],
@@ -183,7 +184,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_stat_path", "\"-unused-arg-\""},
-                               {"random", "always", "25"}]
+                               {"random", "always", "0"}]
      },
      #fi{	% both?/OS X version
          name = "flock",
@@ -272,7 +273,7 @@ typedef struct {
          intercept_return_type = "ssize_t",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "", "25"}]
+         intercept_triggers = [{"random", "", "0"}]
      },
      #fi{	% OS X version
          name = "unlink",
@@ -299,5 +300,21 @@ typedef struct {
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_unlinkat_path", "\"-unused-arg-\""},
                                {"random", "always", "0"}]
+     },
+     #fi{	% OS X version
+         name = "rename",
+         type = intercept,
+         %% We'll re-use the same strstr trigger using the arg named 'path'
+         %% Which means we only check for interesting names in the old path
+         %% and that we ignore the new path.
+         intercept_args = "const char *path, const char *new",
+         intercept_args_call = "path, new",
+         c_headers = ["<unistd.h>"],
+         intercept_errno = "ENOSPC",
+         intercept_return_type = "int",
+         intercept_return_value = "-1",
+         %% Use 2-tuple version here, have the instance name auto-generated
+         intercept_triggers = [{"i_arg_rename_path", "\"-unused-arg-\""},
+                               {"random", "always", "20"}]
      }
     ].
