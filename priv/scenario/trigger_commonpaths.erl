@@ -30,6 +30,7 @@ config() ->
 #ifndef TRIGGER_COMMONPATHS
 #define TRIGGER_COMMONPATHS
 static char *interesting_strings[] = {
+    /* Interesting eleveldb things */
     \".log\",
     \"CURRENT\",
     \"LOCK\",
@@ -37,6 +38,10 @@ static char *interesting_strings[] = {
     \"MANIFEST\",
     \"sst_\",
     \".db\",
+    /* Interesting bitcask things */
+    \"bitcask.data\",
+    \"bitcask.hint\",
+    \"generic.qc\", /* Used by generic_qc_fsm.erl */
     NULL
 };
 
@@ -171,7 +176,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_access_path", "\"-unused-arg-\""},
-                               {"random", "always", "0"}]
+                               {"random", "always", "7"}]
      },
      #fi{	% both?/OS X version
          name = "stat",
@@ -184,7 +189,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_stat_path", "\"-unused-arg-\""},
-                               {"random", "always", "0"}]
+                               {"random", "always", "7"}]
      },
      #fi{	% both?/OS X version
          name = "flock",
@@ -196,9 +201,8 @@ typedef struct {
          intercept_return_type = "int",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "always", "100"},
-                               {"i_arg_flock_bits", "flock_op_array"},
-                               {"random", "", "0"}]
+         intercept_triggers = [{"i_arg_flock_bits", "flock_op_array"},
+                               {"random", "", "7"}]
      },
      #fi{	% both?/OS X version
          name = "fcntl",
@@ -213,9 +217,8 @@ typedef struct {
          intercept_return_type = "int",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "always", "100"},
-                               {"i_arg_fcntl_cmd", "fcntl_cmd_array"},
-                               {"random", "", "0"}]
+         intercept_triggers = [{"i_arg_fcntl_cmd", "fcntl_cmd_array"},
+                               {"random", "", "7"}]
      },
      #fi{	% both?/OS X version
          name = "open",
@@ -230,9 +233,8 @@ typedef struct {
          intercept_return_type = "int",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "always", "100"},
-                               {"i_arg_open_path", "\"-unused-arg-\""},
-                               {"random", "", "0"}]
+         intercept_triggers = [{"i_arg_open_path", "\"-unused-arg-\""},
+                               {"random", "", "7"}]
      },
      #fi{	% OS X version
          name = "opendir$INODE64",
@@ -244,7 +246,7 @@ typedef struct {
          intercept_return_type = "DIR *",
          intercept_return_value = "NULL",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "", "0"}]
+         intercept_triggers = [{"random", "", "7"}]
      },
      %% Yup, ftruncate triggers the same bug during open that others do.
      #fi{	% both?/OS X version
@@ -257,7 +259,7 @@ typedef struct {
          intercept_return_type = "int",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "", "0"}]
+         intercept_triggers = [{"random", "", "7"}]
      },
      %% HRM, pread() is heavily used by EQC via dets, bummer.
      %% We need more smarts here, somehow.
@@ -273,7 +275,7 @@ typedef struct {
          intercept_return_type = "ssize_t",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "", "0"}]
+         intercept_triggers = [{"random", "", "7"}]
      },
      #fi{	% OS X version
          name = "unlink",
@@ -286,7 +288,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_unlink_path", "\"-unused-arg-\""},
-                               {"random", "always", "0"}]
+                               {"random", "always", "7"}]
      },
      #fi{
          name = "unlinkat",	% Linux 3.2 version
@@ -299,7 +301,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_unlinkat_path", "\"-unused-arg-\""},
-                               {"random", "always", "0"}]
+                               {"random", "always", "7"}]
      },
      #fi{	% OS X version
          name = "rename",
@@ -315,6 +317,6 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_rename_path", "\"-unused-arg-\""},
-                               {"random", "always", "20"}]
+                               {"random", "always", "7"}]
      }
     ].
