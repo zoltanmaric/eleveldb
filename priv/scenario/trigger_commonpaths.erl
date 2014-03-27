@@ -176,7 +176,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_access_path", "\"-unused-arg-\""},
-                               {"random", "always", "7"}]
+                               {"random", "percent_7", "7"}]
      },
      #fi{	% both?/OS X version
          name = "stat",
@@ -189,7 +189,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_stat_path", "\"-unused-arg-\""},
-                               {"random", "always", "7"}]
+                               {"random", "percent_7", "7"}]
      },
      #fi{	% both?/OS X version
          name = "flock",
@@ -288,7 +288,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_unlink_path", "\"-unused-arg-\""},
-                               {"random", "always", "7"}]
+                               {"random", "percent_7", "7"}]
      },
      #fi{
          name = "unlinkat",	% Linux 3.2 version
@@ -301,7 +301,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_unlinkat_path", "\"-unused-arg-\""},
-                               {"random", "always", "7"}]
+                               {"random", "percent_7", "7"}]
      },
      #fi{	% OS X version
          name = "rename",
@@ -317,6 +317,6 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_rename_path", "\"-unused-arg-\""},
-                               {"random", "always", "7"}]
+                               {"random", "percent_7", "7"}]
      }
     ].
