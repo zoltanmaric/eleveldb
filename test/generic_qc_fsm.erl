@@ -35,6 +35,10 @@
                 data = [],
                 keys }). %% Keys to use in the test
 
+%% Used for output within EUnit...
+-define(QC_FMT(Fmt, Args),
+        io:format(user, Fmt, Args)).
+
 -define(QC_OUT(P),
         eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
 
@@ -157,6 +161,9 @@ prop() ->
     prop(false).
 
 prop(FI_enabledP) ->
+    prop(FI_enabledP, false).
+
+prop(FI_enabledP, VerboseP) ->
     _ = faulterl_nif:poke("bc_fi_enabled", 0, <<0:8/native>>, false),
     ?FORALL({Cmds, Seed}, {commands(?MODULE), choose(1,9999)},
             begin
@@ -166,6 +173,10 @@ prop(FI_enabledP) ->
                 if FI_enabledP ->
                         ok = faulterl_nif:poke("bc_fi_enabled", 0,
                                                <<1:8/native>>, false),
+                        VerboseI = if VerboseP -> 1;
+                                      true     -> 0 end,
+                        ok = faulterl_nif:poke("bc_fi_verbose", 0,
+                                               <<VerboseI:8/native>>, false),
 
                         ok = faulterl_nif:poke("bc_fi_random_seed", 0,
                                                <<Seed:32/native>>, false),
@@ -184,11 +195,51 @@ prop(FI_enabledP) ->
                         close(Handle)
                 end,
                 %% application:unload(bitcask),
-                Trace = event_logger:get_events(),
-                io:format("Trc ~p\n", [Trace]),
+                Trace0 = event_logger:get_events(),
+                Trace = remove_timestamps(Trace0),
+                Sane = verify_trace(Trace),
+
+                ?WHENFAIL(
+                ?QC_FMT("Trace: ~p\nverify_trace: ~p\n", [Trace, Sane]),
                 aggregate(zip(state_names(H),command_names(Cmds)), 
-                          equals(Res, ok))
+                          conjunction([{postconditions, equals(Res, ok)},
+                                       {verify_trace, Sane}])))
             end).
+
+remove_timestamps(Trace) ->
+    [Event || {_TS, Event} <- Trace].
+
+verify_trace([]) ->
+    true;
+verify_trace([{set_keys, Keys0}|TraceTail]) ->
+    Keys = [<<"k">>|Keys0],
+    Dict0 = dict:from_list([{K, [not_found]} || K <- Keys]),
+    {Bool, _D} =
+        lists:foldl(
+          fun({get, K, V}, {true, D}) ->
+                  Vs = dict:fetch(K, D),
+                  case lists:member(V, Vs) of
+                      true ->
+                          {true, D};
+                      false ->
+                          {{get,expected,Vs,got,V}, D}
+                  end;
+             ({put, yes, K, V}, {true, D}) ->
+                  {true, dict:store(K, [V], D)};
+             ({put, maybe, K, V, _Err}, {true, D}) ->
+                  io:format(user, "pm,", []),
+                  Vs = dict:fetch(K, D),
+                  {true, dict:store(K, [V|Vs], D)};
+             ({delete, yes, K}, {true, D}) ->
+                  {true, dict:store(K, [not_found], D)};
+             ({delete, maybe, K, _Err}, {true, D}) ->
+                  io:format(user, "dm,", []),
+                  Vs = dict:fetch(K, D),
+                  {true, dict:store(K, [not_found|Vs], D)};
+             (_, Acc) ->
+                  Acc
+          end, {true, Dict0}, TraceTail),
+    Bool.
 
 %% Weight for transition (this callback is optional).
 %% Specify how often each transition should be chosen
@@ -249,26 +300,31 @@ really_delete_dir(Dir) ->
 %%     bitcask:merge(H).
 
 open(Dir, Opts) ->
-    %io:format(user, "open\n", []),
     case eleveldb:open(Dir, [{create_if_missing,true},
                              {limited_developer_mem, true}] ++ Opts) of
         {ok, H} ->
+            event_logger:event(open),
             H;
         X ->
-            io:format("open: ~p, ", [X]),
+            event_logger:event({open, X}),
             not_open
     end.
 
 close(not_open) ->
     ok;
 close(H) ->
-    %io:format(user, "close\n", []),
-    eleveldb:close(H).
+    case eleveldb:close(H) of
+        ok = X ->
+            event_logger:event(close),
+            X;
+        X ->
+            event_logger:event({close, X}),
+            X
+    end.
 
 get(not_open, _K) ->
     get_result_ignored;
 get(H, K) ->
-    %io:format(user, "get ~p\n", [K]),
     case eleveldb:get(H, K, []) of
         {ok, V} = X ->
             event_logger:event({get, K, V}),
@@ -281,28 +337,25 @@ get(H, K) ->
 put(not_open, _K, _v) ->
     put_result_ignored;
 put(H, K, V) ->
-    %io:format(user, "put ~p ~p\n", [K, V]),
     case eleveldb:put(H, K, V, []) of
         ok = X ->
             event_logger:event({put, yes, K, V}),
             X;
         X ->
-            io:format("PUT -> ~p, ", [X]),
-            event_logger:event({put, maybe, K, V}),
+            %io:format("PUT -> ~p, ", [X]),
+            event_logger:event({put, maybe, K, V, X}),
             X
     end.
 
 delete(not_open, _K) ->
     delete_result_ignored;
 delete(H, K) ->
-    %io:format(user, "delete ~p\n", [K]),
     case eleveldb:delete(H, K, []) of
         ok = X ->
             event_logger:event({delete, yes, K}),
             X;
         X ->
-            io:format("DELETE -> ~p, ", [X]),
-            event_logger:event({delete, maybe, K}),
+            event_logger:event({delete, maybe, K, X}),
             X
     end.
 
