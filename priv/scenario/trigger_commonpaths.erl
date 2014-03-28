@@ -234,7 +234,7 @@ typedef struct {
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
          intercept_triggers = [{"i_arg_open_path", "\"-unused-arg-\""},
-                               {"random", "", "7"}]
+                               {"random", "", "0"}]
      },
      #fi{	% OS X version
          name = "opendir$INODE64",
@@ -259,7 +259,7 @@ typedef struct {
          intercept_return_type = "int",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "", "7"}]
+         intercept_triggers = [{"random", "", "0"}]
      },
      %% HRM, pread() is heavily used by EQC via dets, bummer.
      %% We need more smarts here, somehow.
@@ -275,7 +275,7 @@ typedef struct {
          intercept_return_type = "ssize_t",
          intercept_return_value = "-1",
          %% Use 2-tuple version here, have the instance name auto-generated
-         intercept_triggers = [{"random", "", "7"}]
+         intercept_triggers = [{"random", "", "0"}]
      },
      #fi{	% OS X version
          name = "unlink",
