@@ -49,16 +49,13 @@ initial_state() ->
     init.
 
 initial_state_data() ->
-    {Ta, Tb, Tc} = now(),
-    TestDir = ?TEST_DIR ++ lists:flatten(io_lib:format(".~w.~w.~w", [Ta, Tb, Tc])),
-    ok = file:make_dir(TestDir),
-    #state{dir = TestDir}.
+    #state{}.
 
 init(_S) ->
-    [{closed, {call, ?MODULE, set_keys, [non_empty(list(key_gen(0)))]}}].
+    [{closed, {call, ?MODULE, set_keys, [non_empty(list(key_gen(0))),
+                                         {var,parameter_test_dir}]}}].
 
 closed(#state{dir=TestDir}) ->
-    io:format(user, "YO: TestDir=~p\n", [TestDir]),
     [{opened, {call, ?MODULE, open, [TestDir,[read_write,
                                               {open_timeout, 0},
                                               {max_file_size, 100},
@@ -73,29 +70,23 @@ opened(S) ->
     [{closed, {call, ?MODULE, close, [S#state.handle]}},
      {opened, {call, ?MODULE, get, [S#state.handle, key(S)]}},
      {opened, {call, ?MODULE, put, [S#state.handle, key(S), value()]}},
-     %% {opened, {call, ?MODULE, put_filler, [S#state.handle, gen_filler_keys(), gen_filler_value()]}},
+     {opened, {call, ?MODULE, put_filler, [S#state.handle, gen_filler_keys(), gen_filler_value()]}},
      {opened, {call, ?MODULE, delete, [S#state.handle, key(S)]}},
      {opened, {call, ?MODULE, fold_all, [S#state.handle]}},
      {opened, {call, ?MODULE, merge, [S#state.dir]}}
      ].
 
-next_state_data(init, closed, S, _, {call, _, set_keys, [Keys]}) ->
-io:format(user, "YEAH: LINE ~p ~p\n", [?LINE, Keys]),
-    S#state{ keys = Keys };
+next_state_data(init, closed, S, _, {call, _, set_keys, [Keys, TestDir]}) ->
+    S#state{ keys = Keys, dir = TestDir };
 next_state_data(closed, opened, S, Handle, {call, _, open, _}) ->
-io:format(user, "YEAH: LINE ~p\n", [?LINE]),
     S#state { handle = Handle };
 next_state_data(opened, closed, S, _, {call, _, close, _}) ->
-io:format(user, "YEAH: LINE ~p\n", [?LINE]),
     S#state { handle = undefined };
 next_state_data(opened, opened, S, _, {call, _, put, [_, Key, Value]}) ->
-io:format(user, "YEAH: LINE ~p\n", [?LINE]),
     S#state { data = orddict:store(Key, Value, S#state.data) };
 next_state_data(opened, opened, S, _, {call, _, delete, [_, Key]}) ->
-io:format(user, "YEAH: LINE ~p\n", [?LINE]),
     S#state { data = orddict:erase(Key, S#state.data) };
 next_state_data(_From, _To, S, _Res, _Call) ->
-io:format(user, "YEAH: LINE ~p\n", [?LINE]),
     S.
 
 precondition(_From,_To,_S,_Call) ->
@@ -138,9 +129,12 @@ prop(FI_enabledP, VerboseP) ->
                 faulterl_nif:poke("bc_fi_enabled", 0, <<0:8/native>>, false),
                 [catch erlang:garbage_collect(Pid) || Pid <- erlang:processes()],
 
+                {Ta, Tb, Tc} = now(),
+                TestDir = ?TEST_DIR ++ lists:flatten(io_lib:format(".~w.~w.~w", [Ta, Tb, Tc])),
+                ok = file:make_dir(TestDir),
+                Env = [{parameter_test_dir, TestDir}],
+
                 event_logger:start_link(),
-                Me = self(),
-                WatcherPid = spawn_link(fun() -> watcher_pid_loop(Me) end),
                 if FI_enabledP ->
                         ok = faulterl_nif:poke("bc_fi_enabled", 0,
                                                <<1:8/native>>, false),
@@ -151,34 +145,26 @@ prop(FI_enabledP, VerboseP) ->
 
                         ok = faulterl_nif:poke("bc_fi_random_seed", 0,
                                                <<Seed:32/native>>, false),
+                        %% io:format("Seed=~p,", [Seed]),
                         ok = faulterl_nif:poke("bc_fi_random_reseed", 0,
                                                <<1:8/native>>, false);
                    true ->
                         ok
                 end,
                 event_logger:start_logging(),
-                {H,{_State, StateData}, Res} = run_commands(?MODULE,Cmds),
+                {H,{_State, StateData}, Res} = run_commands(?MODULE,Cmds,Env),
                 _ = faulterl_nif:poke("bc_fi_enabled", 0, <<0:8/native>>, false),
-                unlink(WatcherPid),
-                WatcherPid ! stop,
-                io:format("H=~p,", [StateData#state.handle]),
                 CloseOK = case (StateData#state.handle) of
                               Handle when is_binary(Handle) ->
-                                  io:format(user, "<c", []),
                                   try
-                                      io:format(user, "FinalClose=~p", [self()]),
                                       close(Handle),
-                                      io:format(user, ">", []),
                                       true
                                   catch X:Y ->
-                                          io:format(user, ">", []),
                                           {false, Handle, X, Y}
                                   end;
                               undefined ->
-                                  io:format(user, "<C>", []),
                                   true;
                               not_open ->
-                                  io:format(user, "<C>", []),
                                   true
                           end,
                 %% application:unload(bitcask),
@@ -203,7 +189,6 @@ prop(FI_enabledP, VerboseP) ->
                                Else
                        end,
 
-                TestDir = StateData#state.dir,
                 NumFilesS = os:cmd("find " ++ TestDir ++ " -type f | wc -l"),
                 {NumFiles, _} = string:to_integer(string:strip(NumFilesS)),
                 LogsS = os:cmd("(ls " ++ TestDir ++ "/*.log | wc -l) 2> /dev/null"),
@@ -224,7 +209,6 @@ prop(FI_enabledP, VerboseP) ->
                 {Level6, _} = string:to_integer(string:strip(Level6S)),
 
   ok = really_delete_dir(TestDir),
-io:format(user, "Res=~p\n", [Res]),
 
                 ?WHENFAIL(
                 ?QC_FMT("Trace: ~p\nverify_trace: ~p\nfinal_close_ok: ~p\n", [Trace, Sane, CloseOK]),
@@ -302,8 +286,7 @@ weight(_From, _To,{call,_,fold_all,_}) ->
 weight(_From,_To,{call,_,_,_}) ->
     100.
 
-set_keys(Keys) -> %% next_state sets the keys for use by key()
-io:format(user, "YEAH: LINE ~p\n", [?LINE]),
+set_keys(Keys, _TestDir) -> %% next_state sets the keys for use by key()
     event_logger:event({set_keys, Keys}),
     ok.
 
@@ -340,29 +323,6 @@ really_delete_dir(Dir) ->
         Else           -> Else
     end.
 
-watcher_pid_loop(Parent) ->
-    register(watcher_pid, self()),
-    %%io:format(user, "WATCHER,", []),
-    watcher_pid_loop2(Parent).
-
-watcher_pid_loop2(Parent) ->
-    receive
-        stop ->
-            %%io:format(user, "watcher,", []),
-            exit(normal);
-        ping ->
-            watcher_pid_loop2(Parent)
-    after 5*1000 ->
-            %%io:format(user, "WATCHER-timeouttimeouttimeouttimeouttimeout parent ~p ~p,", [Parent, ?LINE]),
-            unlink(Parent),
-            exit(normal)
-
-            %% io:format(user, "WATCHER-TIMEOUTTIMEOUTTIMEOUTTIMEOUTTIMEOUT parent ~p ~p,", [Parent, ?LINE]),
-            %% exit(Parent, kill),
-            %% io:format(user, "WATCHER-TIMEOUTTIMEOUTTIMEOUTTIMEOUTTIMEOUT parent ~p ~p,", [Parent, ?LINE]),
-            %% exit(watcher_timeout)
-    end.
-
 %% open(Dir, Opts) ->
 %%     %% io:format(user, "open,", []),
 %%     bitcask:open(Dir, Opts).
@@ -386,33 +346,22 @@ watcher_pid_loop2(Parent) ->
 %% merge(H) ->
 %%     bitcask:merge(H).
 
-open(_) ->
-    io:format(user, "YEAH: LINE ~p\n", [?LINE]).
-open(_,_,_) ->
-    io:format(user, "YEAH: LINE ~p\n", [?LINE]).
-open(_,_,_,_) ->
-    io:format(user, "YEAH: LINE ~p\n", [?LINE]).
-
-open(_Dir, _Opts) ->
-io:format(user, "YEAH: LINE ~p\n", [?LINE]),
-    <<"damn fake">>.
-    %% io:format(user, "{~p", [self()]),
-    %% watcher_pid ! ping,
-    %% case (catch eleveldb:open(Dir, Opts)) of
-    %%     {ok, H} ->
-    %%         event_logger:event(open),
-    %%         H;
-    %%     X ->
-    %%         event_logger:event({open, X}),
-    %%         not_open
-    %% end.
+open(Dir, Opts) ->
+    io:format(user, "{", []),
+    case (catch eleveldb:open(Dir, Opts)) of
+        {ok, H} ->
+            event_logger:event(open),
+            H;
+        X ->
+            event_logger:event({open, X}),
+            not_open
+    end.
 
 close(not_open) ->
     io:format(user, "}", []),
     ok;
 close(H) ->
     io:format(user, "}", []),
-    watcher_pid ! ping,
     case eleveldb:close(H) of
         ok = X ->
             event_logger:event(close),
@@ -425,8 +374,6 @@ close(H) ->
 get(not_open, _K) ->
     get_result_ignored;
 get(H, K) ->
-    io:format(user, "GET~p", [self()]),
-    watcher_pid ! ping,
     case eleveldb:get(H, K, []) of
         {ok, V} = X ->
             event_logger:event({get, get, K, V}),
@@ -439,13 +386,11 @@ get(H, K) ->
 put(not_open, _K, _V) ->
     put_result_ignored;
 put(H, K, V) ->
-    watcher_pid ! ping,
     case eleveldb:put(H, K, V, []) of
         ok = X ->
             event_logger:event({put, yes, K, V}),
             X;
         X ->
-            %io:format("PUT -> ~p, ", [X]),
             event_logger:event({put, maybe, K, V, X}),
             X
     end.
@@ -455,21 +400,13 @@ put_filler(not_open, _Ks, _V) ->
 put_filler(H, {NumKs, Prefix}, ValSize) ->
     io:format(user, "<f", []),
     Val = <<42:(ValSize*8)>>,
-    [begin
-         if N rem 42 == 0 ->
-                 watcher_pid ! ping;
-            true ->
-                 ok
-         end,
-         eleveldb:put(H, <<Prefix/binary, N:32>>, Val, [])
-     end || N <- lists:seq(1, NumKs)],
+    [eleveldb:put(H, <<Prefix/binary, N:32>>, Val, []) || N <- lists:seq(1, NumKs)],
     io:format(user, ">", []),
     ok.
 
 delete(not_open, _K) ->
     delete_result_ignored;
 delete(H, K) ->
-    watcher_pid ! ping,
     case eleveldb:delete(H, K, []) of
         ok = X ->
             event_logger:event({delete, yes, K}),
@@ -483,13 +420,6 @@ fold_all(not_open) ->
     fold_result_ignored;
 fold_all(H) ->
     F = fun({K, V}, Acc) ->
-                PrefixLen = byte_size(K) - 4,
-                <<_:PrefixLen/binary, X:32>> = K,
-                if X == 1 ->
-                        watcher_pid ! ping;
-                   true ->
-                        ok
-                end,
                 event_logger:event({get, fold, K, V}),
                 [{K,V}|Acc]
         end,
