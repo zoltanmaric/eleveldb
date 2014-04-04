@@ -45,9 +45,9 @@ static char *interesting_strings[] = {
     NULL
 };
 
-static int flock_op_array[] = { LOCK_SH, LOCK_EX };
-static int fcntl_cmd_array[] = { F_SETLK, F_SETLKW };
-static int open_write_op_array[] = { O_WRONLY, O_RDWR };
+static int flock_op_array[] = { LOCK_SH, LOCK_EX, 0 };
+static int fcntl_cmd_array[] = { F_SETLK, F_SETLKW, 0 };
+static int open_write_op_array[] = { O_WRONLY, O_RDWR, 0 };
 #endif
 ",
 
