@@ -174,14 +174,15 @@ prop(FI_enabledP, VerboseP) ->
                 %% application:unload(bitcask),
                 Trace0 = event_logger:get_events(),
                 Trace = remove_timestamps(Trace0),
-                Sane0 = verify_trace(Trace),
+                {Sane0, VerifyDict} = verify_trace(Trace),
                 Sane = case Sane0 of
                            {get,_How,_K,expected,[_EXP],got,_GOT}
                              when %(is_binary(EXP) andalso GOT == not_found)
                                   %orelse
                                   %(EXP == not_found andalso is_binary(GOT)) ->
                                   true ->
-                               Str = lists:flatten(io_lib:format("~w", [Trace])),
+                               SimpleTrace1 = simplify_trace(Trace),
+                               Str = lists:flatten(io_lib:format("~w", [SimpleTrace1])),
                                case re:run(Str, RE1) of
                                    {match, _} ->
                                        ?QC_FMT("SKIP1", []),
@@ -193,6 +194,7 @@ prop(FI_enabledP, VerboseP) ->
                                Else
                        end,
 
+                NumKeys = dict:size(VerifyDict),
                 Logs = length(filelib:wildcard(TestDir ++ "/*.log")),
                 Level0 = length(filelib:wildcard(TestDir ++ "/sst_0/*")),
                 Level1 = length(filelib:wildcard(TestDir ++ "/sst_1/*")),
@@ -205,7 +207,11 @@ prop(FI_enabledP, VerboseP) ->
   ok = really_delete_dir(TestDir),
 
                 ?WHENFAIL(
-                ?QC_FMT("Trace: ~p\nverify_trace: ~p\nfinal_close_ok: ~p\n", [Trace, Sane, CloseOK]),
+                begin
+                    SimpleTrace = simplify_trace(Trace),
+                    ?QC_FMT("Trace: ~p\nverify_trace: ~p\nfinal_close_ok: ~p\n", [SimpleTrace, Sane, CloseOK])
+                end,
+                measure(num_keys, NumKeys,
                 measure(log_files, Logs,
                 measure(level_0_files, Level0,
                 measure(level_1_files, Level1,
@@ -217,17 +223,17 @@ prop(FI_enabledP, VerboseP) ->
                 aggregate(zip(state_names(H),command_names(Cmds)), 
                           conjunction([{postconditions, equals(Res, ok)},
                                        {verify_trace, Sane},
-                                       {final_close_ok, CloseOK}])))))))))))
+                                       {final_close_ok, CloseOK}]))))))))))))
             end).
 
 remove_timestamps(Trace) ->
     [Event || {_TS, Event} <- Trace].
 
 verify_trace([]) ->
-    true;
+    {true, dict:new()};
 verify_trace([{set_keys, Keys}|TraceTail]) ->
     Dict0 = dict:from_list([{K, [not_found]} || K <- Keys]),
-    {Bool, _D} =
+    {Bool, D} =
         lists:foldl(
           fun({get, How, K, V}, {true, D}) ->
                   PrefixLen = byte_size(K) - 4,
@@ -248,8 +254,12 @@ verify_trace([{set_keys, Keys}|TraceTail]) ->
                   {true, dict:store(K, [V], D)};
              ({put, maybe, K, V, _Err}, {true, D}) ->
                   io:format(user, "pm,", []),
-                  Vs = dict:fetch(K, D),
-                  {true, dict:store(K, [V|Vs], D)};
+                  case dict:find (K, D) of
+                      {ok, Vs} ->
+                          {true, dict:store(K, [V|Vs], D)};
+                      error ->
+                          {true, dict:store(K, [V], D)}
+                  end;
              ({delete, yes, K}, {true, D}) ->
                   {true, dict:store(K, [not_found], D)};
              ({delete, maybe, K, _Err}, {true, D}) ->
@@ -266,7 +276,30 @@ verify_trace([{set_keys, Keys}|TraceTail]) ->
                   %%io:format(user, "verify_trace: ~p\n", [_Else]),
                   Acc
           end, {true, Dict0}, TraceTail),
-    Bool.
+    {Bool, D}.
+
+simplify_trace(Trace) ->
+    lists:filter(
+      fun({put, _, K, _}) ->
+              zero_suffix_p(K);
+         ({delete, _, K}) ->
+              zero_suffix_p(K);
+         ({delete, _, K, _}) ->
+              zero_suffix_p(K);
+         ({get, _, K, _}) ->
+              zero_suffix_p(K);
+         ({open, _}) ->
+              true;
+         ({close, _}) ->
+              true;
+         (_) ->
+              false
+      end, Trace).
+
+zero_suffix_p(K) ->
+    PrefixLen = byte_size(K) - 4,
+    <<_:PrefixLen/binary, Suffix/binary>> = K,
+    Suffix == <<0,0,0,0>>.
 
 %% Weight for transition (this callback is optional).
 %% Specify how often each transition should be chosen
@@ -345,7 +378,7 @@ open(Dir, Opts) ->
     case (catch eleveldb:open(Dir, Opts)) of
         {ok, H} ->
             io:format(user, "{", []),
-            event_logger:event(open),
+            event_logger:event({open, ok}),
             H;
         X ->
             io:format(user, ",", []),
@@ -360,7 +393,7 @@ close(H) ->
     io:format(user, "}", []),
     case eleveldb:close(H) of
         ok = X ->
-            event_logger:event(close),
+            event_logger:event({close, ok}),
             X;
         X ->
             event_logger:event({close, X}),
@@ -396,7 +429,7 @@ put_filler(not_open, _Ks, _V) ->
 put_filler(H, {NumKs, Prefix}, ValSize) ->
     io:format(user, "<i", []),
     Val = <<42:(ValSize*8)>>,
-    [eleveldb:put(H, <<Prefix/binary, N:32>>, Val, []) || N <- lists:seq(1, NumKs)],
+    [put(H, <<Prefix/binary, N:32>>, Val) || N <- lists:seq(1, NumKs)],
     io:format(user, ">", []),
     ok.
 
@@ -416,13 +449,7 @@ fold_all(not_open) ->
     fold_result_ignored;
 fold_all(H) ->
     F = fun({K, V}, Acc) ->
-                PrefixLen = byte_size(K) - 4,
-                <<_:PrefixLen/binary, Suffix:32>> = K,
-                if Suffix == 0 ->
-                        event_logger:event({get, fold, K, V});
-                   true ->
-                        ok
-                end,
+                event_logger:event({get, fold, K, V}),
                 [{K,V}|Acc]
         end,
 io:format(user, "<f", []),
