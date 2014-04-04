@@ -70,7 +70,7 @@ opened(S) ->
     [{closed, {call, ?MODULE, close, [S#state.handle]}},
      {opened, {call, ?MODULE, get, [S#state.handle, key(S)]}},
      {opened, {call, ?MODULE, put, [S#state.handle, key(S), value()]}},
-     {opened, {call, ?MODULE, put_filler, [S#state.handle, gen_filler_keys(), gen_filler_value()]}},
+     {opened, {call, ?MODULE, put_filler, [S#state.handle, gen_filler_keys(), gen_filler_size()]}},
      {opened, {call, ?MODULE, delete, [S#state.handle, key(S)]}},
      {opened, {call, ?MODULE, fold_all, [S#state.handle]}},
      {opened, {call, ?MODULE, merge, [S#state.dir]}}
@@ -89,6 +89,10 @@ next_state_data(opened, opened, S, _, {call, _, delete, [_, Key]}) ->
 next_state_data(_From, _To, S, _Res, _Call) ->
     S.
 
+precondition(_From,_To,S,{call,_,put,[_H, K, _V]}) ->
+    lists:member(K, S#state.keys);
+precondition(_From,_To,S,{call,_,get,[_H, K]}) ->
+    lists:member(K, S#state.keys);
 precondition(_From,_To,_S,_Call) ->
     true.
 
@@ -189,30 +193,19 @@ prop(FI_enabledP, VerboseP) ->
                                Else
                        end,
 
-                NumFilesS = os:cmd("find " ++ TestDir ++ " -type f | wc -l"),
-                {NumFiles, _} = string:to_integer(string:strip(NumFilesS)),
-                LogsS = os:cmd("(ls " ++ TestDir ++ "/*.log | wc -l) 2> /dev/null"),
-                {Logs, _} = string:to_integer(string:strip(LogsS)),
-                Level0S = os:cmd("(ls " ++ TestDir ++ "/sst_0 | wc -l) 2> /dev/null"),
-                {Level0, _} = string:to_integer(string:strip(Level0S)),
-                Level1S = os:cmd("(ls " ++ TestDir ++ "/sst_1 | wc -l) 2> /dev/null"),
-                {Level1, _} = string:to_integer(string:strip(Level1S)),
-                Level2S = os:cmd("(ls " ++ TestDir ++ "/sst_2 | wc -l) 2> /dev/null"),
-                {Level2, _} = string:to_integer(string:strip(Level2S)),
-                Level3S = os:cmd("(ls " ++ TestDir ++ "/sst_3 | wc -l) 2> /dev/null"),
-                {Level3, _} = string:to_integer(string:strip(Level3S)),
-                Level4S = os:cmd("(ls " ++ TestDir ++ "/sst_4 | wc -l) 2> /dev/null"),
-                {Level4, _} = string:to_integer(string:strip(Level4S)),
-                Level5S = os:cmd("(ls " ++ TestDir ++ "/sst_5 | wc -l) 2> /dev/null"),
-                {Level5, _} = string:to_integer(string:strip(Level5S)),
-                Level6S = os:cmd("(ls " ++ TestDir ++ "/sst_6 | wc -l) 2> /dev/null"),
-                {Level6, _} = string:to_integer(string:strip(Level6S)),
+                Logs = length(filelib:wildcard(TestDir ++ "/*.log")),
+                Level0 = length(filelib:wildcard(TestDir ++ "/sst_0/*")),
+                Level1 = length(filelib:wildcard(TestDir ++ "/sst_1/*")),
+                Level2 = length(filelib:wildcard(TestDir ++ "/sst_2/*")),
+                Level3 = length(filelib:wildcard(TestDir ++ "/sst_3/*")),
+                Level4 = length(filelib:wildcard(TestDir ++ "/sst_4/*")),
+                Level5 = length(filelib:wildcard(TestDir ++ "/sst_5/*")),
+                Level6 = length(filelib:wildcard(TestDir ++ "/sst_6/*")),
 
   ok = really_delete_dir(TestDir),
 
                 ?WHENFAIL(
                 ?QC_FMT("Trace: ~p\nverify_trace: ~p\nfinal_close_ok: ~p\n", [Trace, Sane, CloseOK]),
-                measure(num_files, NumFiles,
                 measure(log_files, Logs,
                 measure(level_0_files, Level0,
                 measure(level_1_files, Level1,
@@ -222,9 +215,9 @@ prop(FI_enabledP, VerboseP) ->
                 measure(level_5_files, Level5,
                 measure(level_6_files, Level6,
                 aggregate(zip(state_names(H),command_names(Cmds)), 
-                          conjunction([{postQQQconditions, equals(Res, ok)},
+                          conjunction([{postconditions, equals(Res, ok)},
                                        {verify_trace, Sane},
-                                       {final_close_ok, CloseOK}]))))))))))))
+                                       {final_close_ok, CloseOK}])))))))))))
             end).
 
 remove_timestamps(Trace) ->
@@ -277,11 +270,14 @@ verify_trace([{set_keys, Keys}|TraceTail]) ->
 
 %% Weight for transition (this callback is optional).
 %% Specify how often each transition should be chosen
-weight(_From, _To,{call,_,close,_}) ->
-    10;
+
+weight(_From, _To,{call,_,put,_}) ->
+    300;
+weight(_From, _To,{call,_,delete,_}) ->
+    300;
+weight(_From, _To,{call,_,get,_}) ->
+    300;
 weight(_From, _To,{call,_,merge,_}) ->
-    5;
-weight(_From, _To,{call,_,fold_all,_}) ->
     5;
 weight(_From,_To,{call,_,_,_}) ->
     100.
@@ -291,27 +287,26 @@ set_keys(Keys, _TestDir) -> %% next_state sets the keys for use by key()
     ok.
 
 key_gen(SuffixI) ->
-    ?LET(Prefix,
-         ?SUCHTHAT(X, binary(), X /= <<>>),
-         <<Prefix/binary, SuffixI:32>>).
+    noshrink(?LET(Prefix,
+                  ?SUCHTHAT(X, binary(), X /= <<>>),
+                  <<Prefix/binary, SuffixI:32>>)).
 
 key(#state{keys = Keys}) ->
     elements(Keys).
 
 value() ->
-    binary().
+    noshrink(binary()).
 
 sync_strategy() ->
     {sync_strategy, oneof([none])}.
 
 gen_filler_keys() ->
-    {choose(1, 4*1000), non_empty(binary())}.
+    {choose(1, 4*1000), noshrink(non_empty(binary()))}.
     %% ?LET({N, Prefix}, {choose(1, 4*1000), non_empty(binary())},
     %%      [<<Prefix/binary, I:32>> || I <- lists:seq(1, N)]).
 
-gen_filler_value() ->
+gen_filler_size() ->
     choose(1, 128*1024).
-    %% ?LET(Size, choose(1, 128*1024), <<42:(Size*8)>>).
 
 really_delete_dir(Dir) ->
     [file:delete(X) || X <- filelib:wildcard(Dir ++ "/*")],
@@ -347,18 +342,19 @@ really_delete_dir(Dir) ->
 %%     bitcask:merge(H).
 
 open(Dir, Opts) ->
-    io:format(user, "{", []),
     case (catch eleveldb:open(Dir, Opts)) of
         {ok, H} ->
+            io:format(user, "{", []),
             event_logger:event(open),
             H;
         X ->
+            io:format(user, ",", []),
             event_logger:event({open, X}),
             not_open
     end.
 
 close(not_open) ->
-    io:format(user, "}", []),
+    io:format(user, ",", []),
     ok;
 close(H) ->
     io:format(user, "}", []),
@@ -398,7 +394,7 @@ put(H, K, V) ->
 put_filler(not_open, _Ks, _V) ->
     put_result_ignored;
 put_filler(H, {NumKs, Prefix}, ValSize) ->
-    io:format(user, "<f", []),
+    io:format(user, "<i", []),
     Val = <<42:(ValSize*8)>>,
     [eleveldb:put(H, <<Prefix/binary, N:32>>, Val, []) || N <- lists:seq(1, NumKs)],
     io:format(user, ">", []),
@@ -420,10 +416,18 @@ fold_all(not_open) ->
     fold_result_ignored;
 fold_all(H) ->
     F = fun({K, V}, Acc) ->
-                event_logger:event({get, fold, K, V}),
+                PrefixLen = byte_size(K) - 4,
+                <<_:PrefixLen/binary, Suffix:32>> = K,
+                if Suffix == 0 ->
+                        event_logger:event({get, fold, K, V});
+                   true ->
+                        ok
+                end,
                 [{K,V}|Acc]
         end,
+io:format(user, "<f", []),
     _Res = eleveldb:fold(H, F, [], []),
+io:format(user, ">", []),
     %%io:format(user, "~p,", [_Res]),
     ok.
 
