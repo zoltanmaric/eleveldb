@@ -88,7 +88,7 @@ typedef struct {
     for (i = 0; array[i] != 0 && i < sizeof(a->array); i++) {
         a->array[i] = array[i];
     }
-    array[i] = 0;
+    a->array[i] = 0;
 ",
     %% NOTE: 'path' below matches last arg to config()
     BitC_TBody = "
@@ -117,7 +117,7 @@ typedef struct {
     for (i = 0; array[i] != 0 && i < sizeof(a->array); i++) {
         a->array[i] = array[i];
     }
-    array[i] = 0;
+    a->array[i] = 0;
 ",
     %% NOTE: 'path' below matches last arg to config()
     IntArgC_TBody = "
