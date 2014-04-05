@@ -334,12 +334,10 @@ sync_strategy() ->
     {sync_strategy, oneof([none])}.
 
 gen_filler_keys() ->
-    {choose(1, 4*1000), noshrink(non_empty(binary()))}.
-    %% ?LET({N, Prefix}, {choose(1, 4*1000), non_empty(binary())},
-    %%      [<<Prefix/binary, I:32>> || I <- lists:seq(1, N)]).
+    noshrink({choose(1, 4*1000), non_empty(binary())}).
 
 gen_filler_size() ->
-    choose(1, 128*1024).
+    noshrink(choose(1, 128*1024)).
 
 really_delete_dir(Dir) ->
     [file:delete(X) || X <- filelib:wildcard(Dir ++ "/*")],
@@ -350,29 +348,6 @@ really_delete_dir(Dir) ->
         {error,enoent} -> ok;
         Else           -> Else
     end.
-
-%% open(Dir, Opts) ->
-%%     %% io:format(user, "open,", []),
-%%     bitcask:open(Dir, Opts).
-
-%% close(H) ->
-%%     %% io:format(user, "close,", []),
-%%     bitcask:close(H).
-
-%% get(H, K) ->
-%%     %% io:format(user, "get ~p,", [K]),
-%%     bitcask:get(H, K).
-
-%% put(H, K, V) ->
-%%     %% io:format(user, "put ~p,", [K]),
-%%     bitcask:put(H, K, V).
-
-%% delete(H, K) ->
-%%     %% io:format(user, "delete ~p,", [K]),
-%%     bitcask:delete(H, K).
-
-%% merge(H) ->
-%%     bitcask:merge(H).
 
 open(Dir, Opts) ->
     case (catch eleveldb:open(Dir, Opts)) of
