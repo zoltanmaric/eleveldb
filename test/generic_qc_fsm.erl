@@ -127,7 +127,6 @@ prop(FI_enabledP) ->
 
 prop(FI_enabledP, VerboseP) ->
     _ = faulterl_nif:poke("bc_fi_enabled", 0, <<0:8/native>>, false),
-    {ok, RE1} = re:compile("open,.*put,.*close,.*open,.*get,"),
     ?FORALL({Cmds, Seed}, {commands(?MODULE), choose(1,99999)},
             begin
                 faulterl_nif:poke("bc_fi_enabled", 0, <<0:8/native>>, false),
@@ -174,25 +173,26 @@ prop(FI_enabledP, VerboseP) ->
                 %% application:unload(bitcask),
                 Trace0 = event_logger:get_events(),
                 Trace = remove_timestamps(Trace0),
-                {Sane0, VerifyDict} = verify_trace(Trace),
-                Sane = case Sane0 of
-                           {get,_How,_K,expected,[_EXP],got,_GOT}
-                             when %(is_binary(EXP) andalso GOT == not_found)
-                                  %orelse
-                                  %(EXP == not_found andalso is_binary(GOT)) ->
-                                  true ->
-                               SimpleTrace1 = simplify_trace(Trace),
-                               Str = lists:flatten(io_lib:format("~w", [SimpleTrace1])),
-                               case re:run(Str, RE1) of
-                                   {match, _} ->
-                                       ?QC_FMT("SKIP1", []),
-                                       true;
-                                   _ ->
-                                       Sane0
-                               end;
-                           Else ->
-                               Else
-                       end,
+                {Sane, VerifyDict} = verify_trace(Trace),
+                %% This is a hack to avoid an earlier problem with eleveldb.
+                %% Sane = case Sane0 of
+                %%            {get,_How,_K,expected,[_EXP],got,_GOT}
+                %%              when %(is_binary(EXP) andalso GOT == not_found)
+                %%                   %orelse
+                %%                   %(EXP == not_found andalso is_binary(GOT)) ->
+                %%                   true ->
+                %%                SimpleTrace1 = simplify_trace(Trace),
+                %%                Str = lists:flatten(io_lib:format("~w", [SimpleTrace1])),
+                %%                case re:run(Str, RE1) of
+                %%                    {match, _} ->
+                %%                        ?QC_FMT("SKIP1", []),
+                %%                        true;
+                %%                    _ ->
+                %%                        Sane0
+                %%                end;
+                %%            Else ->
+                %%                Else
+                %%        end,
 
                 NumKeys = dict:size(VerifyDict),
                 Logs = length(filelib:wildcard(TestDir ++ "/*.log")),
