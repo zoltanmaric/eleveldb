@@ -57,6 +57,7 @@ init(_S) ->
 
 closed(#state{dir=TestDir}) ->
     [{opened, {call, ?MODULE, open, [TestDir,[read_write,
+                                              {paranoid_checks, true},
                                               {open_timeout, 0},
                                               {max_file_size, 100},
                                               sync_strategy(),
