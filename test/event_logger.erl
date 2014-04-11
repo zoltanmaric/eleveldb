@@ -35,18 +35,18 @@ start_link() ->
   gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 start_logging() ->
-  gen_server:call(?MODULE, {start, timestamp()}).
+  gen_server:call(?MODULE, {start, timestamp()}, infinity).
 
 event(EventData) ->
   gen_server:call(?MODULE,
-    #event{ timestamp = timestamp(), data = EventData }).
+    #event{ timestamp = timestamp(), data = EventData }, infinity).
 
 async_event(EventData) ->
   gen_server:cast(?MODULE,
     #event{ timestamp = timestamp(), data = EventData }).
 
 get_events() ->
-  gen_server:call(?MODULE, get_events).
+  gen_server:call(?MODULE, get_events, infinity).
 
 %%====================================================================
 %% gen_server callbacks
