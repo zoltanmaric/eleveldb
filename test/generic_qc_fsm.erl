@@ -94,6 +94,8 @@ precondition(_From,_To,S,{call,_,put,[_H, K, _V]}) ->
     lists:member(K, S#state.keys);
 precondition(_From,_To,S,{call,_,get,[_H, K]}) ->
     lists:member(K, S#state.keys);
+precondition(_From,_To,S,{call,_,delete,[_H, K]}) ->
+    lists:member(K, S#state.keys);
 precondition(_From,_To,_S,_Call) ->
     true.
 
