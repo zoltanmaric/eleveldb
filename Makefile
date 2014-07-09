@@ -17,8 +17,8 @@ compile: deps
 test: compile_scenarios
 
 compile_scenarios:
-	-mkdir -p .eunit
-	erlc -o deps/faulterl/ebin -I deps/faulterl/include priv/scenario/*erl
+	(cd deps/faulterl/priv/lfi ; \
+	 ./libfi ../../../../priv/scenario/intercept_commonpaths.xml)
 
 clean:
 	${REBAR} clean

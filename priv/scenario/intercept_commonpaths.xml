@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- example: ./libfi -v -E ~/b/src/eleveldb/priv/scenario/intercept_commonpaths.cpp ~/b/src/eleveldb/priv/scenario/intercept_commonpaths.xml -->
+
+<plan>
+
+  <!-- TRIGGERS -->
+
+  <!-- toy for experimentation ... not for actual eleveldb testing -->
+  <!-- Example of skipping the 1st arg and using strstr() to test the 2nd -->
+  <!-- arg ... using the `goofy_strings` array of strings. -->
+  <trigger id="arg0_skip_string_arg1_string_STRSTR_goofy_strings" class="ExamineArgs">
+   <args>
+    <skip>string</skip>
+    <argType>string</argType>
+    <argCompare>strstr</argCompare>
+    <argBaseArrayChooser>1</argBaseArrayChooser>
+   </args>
+  </trigger>
+
+  <trigger id="arg0_string_STRSTR_interesting_paths" class="ExamineArgs">
+   <args>
+    <argType>string</argType>
+    <argCompare>strstr</argCompare>
+    <argBaseArrayChooser>0</argBaseArrayChooser>
+   </args>
+  </trigger>
+
+  <trigger id="arg0_skip_int_arg1_string_STRSTR_interesting_paths" class="ExamineArgs">
+   <args>
+    <skip>int</skip>
+    <argType>string</argType>
+    <argCompare>strstr</argCompare>
+    <argBaseArrayChooser>0</argBaseArrayChooser>
+   </args>
+  </trigger>
+
+  <trigger id="arg0_skip_int_arg1_int_AND_flock_op_array" class="ExamineArgs">
+   <args>
+    <skip>int</skip>
+    <argType>int</argType>
+    <argCompare>and</argCompare>
+    <argBaseArrayChooser>0</argBaseArrayChooser>
+   </args>
+  </trigger>
+
+  <trigger id="arg0_skip_int_arg1_int_EQUAL_fcntl_cmd_array" class="ExamineArgs">
+   <args>
+    <skip>int</skip>
+    <argType>int</argType>
+    <argCompare>equal</argCompare>
+    <argBaseArrayChooser>1</argBaseArrayChooser>
+   </args>
+  </trigger>
+
+  <trigger id="arg0_skip_string_arg1_int_AND_open_write_op_array" class="ExamineArgs">
+   <args>
+    <skip>int</skip>
+    <argType>int</argType>
+    <argCompare>equal</argCompare>
+    <argBaseArrayChooser>2</argBaseArrayChooser>
+   </args>
+  </trigger>
+
+  <trigger id="random_7" class="RandomTrigger">
+    <args>
+      <percent>7</percent>
+    </args>
+  </trigger>
+
+  <!-- INTERCEPTS -->
+
+  <!-- toy for experimentation ... not for actual eleveldb testing -->
+
+  <function name="symlink" argc="2" retval="-1" errno="ENOSPC">
+    <triggerx ref="arg0_skip_string_arg1_string_STRSTR_goofy_strings" />
+  </function>
+
+  <!-- actual eleveldb testing.... -->
+
+  <function name="access" argc="2" retval="-1" errno="EFAULT">
+    <triggerx ref="arg0_string_STRSTR_interesting_paths" />
+    <triggerx ref="random_7" />
+  </function>
+
+  <function name="stat" argc="2" retval="-1" errno="EIO">
+    <triggerx ref="arg0_string_STRSTR_interesting_paths" />
+    <triggerx ref="random_7" />
+  </function>
+
+  <function name="flock" argc="2" retval="-1" errno="EDEADLK">
+    <triggerx ref="arg0_skip_int_arg1_int_AND_flock_op_array" />
+    <!-- triggerx ref="random_7" / -->
+  </function>
+
+  <function name="fcntl" argc="2" retval="-1" errno="EDEADLK">
+    <triggerx ref="arg0_skip_int_arg1_int_EQUAL_fcntl_cmd_array" />
+    <!-- triggerx ref="random_7" / -->
+  </function>
+
+  <function name="open" argc="2" retval="-1" errno="ENOSPC">
+    <triggerx ref="arg0_string_STRSTR_interesting_paths" />
+    <!-- triggerx ref="random_7" / -->
+  </function>
+
+  <function name="XXXopendir" argc="1" alias="XXXopendir$INODE64" retval="0" errno="EMFILE">
+    <triggerx ref="random_7" />
+  </function>
+
+  <function name="ftruncate" argc="2" retval="-1" errno="ENOSPC">
+    <triggerx ref="random_7" />
+  </function>
+
+  <function name="unlink" argc="1" retval="-1" errno="ENOSPC">
+    <triggerx ref="arg0_string_STRSTR_interesting_paths" />
+    <triggerx ref="random_7" />
+  </function>
+
+  <!-- Linux only -->
+  <function name="unlinkat" argc="3" retval="-1" errno="ENOSPC">
+    <triggerx ref="arg0_skip_int_arg1_string_STRSTR_interesting_paths" />
+    <triggerx ref="random_7" />
+  </function>
+
+  <function name="rename" argc="2" retval="-1" errno="ENOSPC">
+    <triggerx ref="arg0_string_STRSTR_interesting_paths" />
+    <triggerx ref="random_7" />
+  </function>
+
+</plan>

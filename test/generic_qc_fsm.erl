@@ -128,11 +128,11 @@ prop() ->
 prop(FI_enabledP) ->
     prop(FI_enabledP, false).
 
-prop(FI_enabledP, VerboseP) ->
-    _ = faulterl_nif:poke("bc_fi_enabled", 0, <<0:8/native>>, false),
+prop(FI_enabledP, _VerboseP) ->
+    _ = faulterl_nif:poke("g_libfi_enabled", 0, <<0:8/native>>, false),
     ?FORALL({Cmds, Seed}, {commands(?MODULE), choose(1,99999)},
             begin
-                faulterl_nif:poke("bc_fi_enabled", 0, <<0:8/native>>, false),
+                faulterl_nif:poke("g_libfi_enabled", 0, <<0:8/native>>, false),
                 [catch erlang:garbage_collect(Pid) || Pid <- erlang:processes()],
 
                 {Ta, Tb, Tc} = now(),
@@ -142,24 +142,24 @@ prop(FI_enabledP, VerboseP) ->
 
                 event_logger:start_link(),
                 if FI_enabledP ->
-                        ok = faulterl_nif:poke("bc_fi_enabled", 0,
+                        ok = faulterl_nif:poke("g_libfi_enabled", 0,
                                                <<1:8/native>>, false),
-                        VerboseI = if VerboseP -> 1;
-                                      true     -> 0 end,
-                        ok = faulterl_nif:poke("bc_fi_verbose", 0,
-                                               <<VerboseI:8/native>>, false),
+                        %% VerboseI = if VerboseP -> 1;
+                        %%               true     -> 0 end,
+                        %% ok = faulterl_nif:poke("bc_fi_verbose", 0,
+                        %%                        <<VerboseI:8/native>>, false),
 
-                        ok = faulterl_nif:poke("bc_fi_random_seed", 0,
+                        ok = faulterl_nif:poke("g_libfi_RandomTrigger_seed", 0,
                                                <<Seed:32/native>>, false),
                         %% io:format("Seed=~p,", [Seed]),
-                        ok = faulterl_nif:poke("bc_fi_random_reseed", 0,
+                        ok = faulterl_nif:poke("g_libfi_RandomTrigger_reseed", 0,
                                                <<1:8/native>>, false);
                    true ->
                         ok
                 end,
                 event_logger:start_logging(),
                 {H,{_State, StateData}, Res} = run_commands(?MODULE,Cmds,Env),
-                _ = faulterl_nif:poke("bc_fi_enabled", 0, <<0:8/native>>, false),
+                _ = faulterl_nif:poke("g_libfi_enabled", 0, <<0:8/native>>, false),
                 CloseOK = case (StateData#state.handle) of
                               Handle when is_binary(Handle) ->
                                   try
