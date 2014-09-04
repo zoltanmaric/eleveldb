@@ -66,10 +66,6 @@
 
 -spec init() -> ok | {error, any()}.
 init() ->
-%%    NumWriteThreads = case os:getenv("ELEVELDB_N_WRITE_THREADS") of
-%%                        false -> 71;                     % must be a prime number
-%%                        N -> erlang:list_to_integer(N)   % exception on bad value
-%%                      end,
     SoName = case code:priv_dir(?MODULE) of
                  {error, bad_name} ->
                      case code:which(?MODULE) of
@@ -89,19 +85,27 @@ init() ->
                          {block_size, pos_integer()} |                  %% DEPRECATED
                          {sst_block_size, pos_integer()} |
                          {block_restart_interval, pos_integer()} |
+                         {block_size_steps, pos_integer()} |
                          {paranoid_checks, boolean()} |
                          {verify_compactions, boolean()} |
                          {compression, boolean()} |
                          {use_bloomfilter, boolean() | pos_integer()} |
-                         {write_threads, pos_integer()} |
                          {total_memory, pos_integer()} |
                          {total_leveldb_mem, pos_integer()} |
                          {total_leveldb_mem_percent, pos_integer()} |
                          {is_internal_db, boolean()} |
-                         {limited_developer_mem, boolean()}].
+                         {limited_developer_mem, boolean()} |
+                         {eleveldb_threads, pos_integer()} |
+                         {fadvise_willneed, boolean()} |
+                         {block_cache_threshold, pos_integer()} |
+                         {delete_threshold, pos_integer()} |
+                         {tiered_slow_level, pos_integer()} |
+                         {tiered_fast_prefix, string()} |
+                         {tiered_slow_prefix, string()}].
 
 -type read_options() :: [{verify_checksums, boolean()} |
-                         {fill_cache, boolean()}].
+                         {fill_cache, boolean()} |
+                         {iterator_refresh, boolean()}].
 
 -type write_options() :: [{sync, boolean()}].
 
@@ -115,7 +119,7 @@ init() ->
 
 -opaque itr_ref() :: binary().
 
--spec async_open(reference(), string(), open_options()) -> {ok, db_ref()} | {error, any()}.
+-spec async_open(reference(), string(), open_options()) -> ok.
 async_open(_CallerRef, _Name, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
@@ -128,10 +132,11 @@ open(Name, Opts) ->
 
 -spec close(db_ref()) -> ok | {error, any()}.
 close(Ref) ->
-    eleveldb_bump:big(),
-    close_int(Ref).
+    CallerRef = make_ref(),
+    async_close(CallerRef, Ref),
+    ?WAIT_FOR_REPLY(CallerRef).
 
-close_int(_Ref) ->
+async_close(_CallerRef, _Ref) ->
     erlang:nif_error({error, not_loaded}).
 
 -spec async_get(reference(), db_ref(), binary(), read_options()) -> ok.
@@ -156,12 +161,12 @@ write(Ref, Updates, Opts) ->
     async_write(CallerRef, Ref, Updates, Opts),
     ?WAIT_FOR_REPLY(CallerRef).
 
--spec async_write(reference(), db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
+-spec async_write(reference(), db_ref(), write_actions(), write_options()) -> ok.
 async_write(_CallerRef, _Ref, _Updates, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
--spec async_iterator(reference(), db_ref(), read_options()) -> {_CallerRef, ok, itr_ref()}.
--spec async_iterator(reference(), db_ref(), read_options(), keys_only) -> {_CallerRef, ok, itr_ref()}.
+-spec async_iterator(reference(), db_ref(), read_options()) -> ok.
+-spec async_iterator(reference(), db_ref(), read_options(), keys_only) -> ok.
 async_iterator(_CallerRef, _Ref, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
@@ -180,10 +185,11 @@ iterator(Ref, Opts, keys_only) ->
     async_iterator(CallerRef, Ref, Opts, keys_only),
     ?WAIT_FOR_REPLY(CallerRef).
 
--spec async_iterator_move(reference(), itr_ref(), iterator_action()) -> {reference(), {ok, Key::binary(), Value::binary()}} |
-                                                                        {reference(), {ok, Key::binary()}} |
-                                                                        {reference(), {error, invalid_iterator}} |
-                                                                        {reference(), {error, iterator_closed}}.
+-spec async_iterator_move(reference()|undefined, itr_ref(), iterator_action()) -> reference() |
+                                                                        {ok, Key::binary(), Value::binary()} |
+                                                                        {ok, Key::binary()} |
+                                                                        {error, invalid_iterator} |
+                                                                        {error, iterator_closed}.
 async_iterator_move(_CallerRef, _IterRef, _IterAction) ->
     erlang:nif_error({error, not_loaded}).
 
@@ -204,10 +210,11 @@ iterator_move(_IRef, _Loc) ->
 
 -spec iterator_close(itr_ref()) -> ok.
 iterator_close(IRef) ->
-    eleveldb_bump:small(),
-    iterator_close_int(IRef).
+    CallerRef = make_ref(),
+    async_iterator_close(CallerRef, IRef),
+    ?WAIT_FOR_REPLY(CallerRef).
 
-iterator_close_int(_IRef) ->
+async_iterator_close(_CallerRef, _IRef) ->
     erlang:nif_error({error, not_loaded}).
 
 -type fold_fun() :: fun(({Key::binary(), Value::binary()}, any()) -> any()).
@@ -267,19 +274,28 @@ option_types(open) ->
      {block_size, integer},                            %% DEPRECATED
      {sst_block_size, integer},
      {block_restart_interval, integer},
+     {block_size_steps, integer},
      {paranoid_checks, bool},
      {verify_compactions, bool},
      {compression, bool},
      {use_bloomfilter, any},
-     {write_threads, integer},
      {total_memory, integer},
      {total_leveldb_mem, integer},
      {total_leveldb_mem_percent, integer},
      {is_internal_db, bool},
-     {limited_developer_mem, bool}];
+     {limited_developer_mem, bool},
+     {eleveldb_threads, integer},
+     {fadvise_willneed, bool},
+     {block_cache_threshold, integer},
+     {delete_threshold, integer},
+     {tiered_slow_level, integer},
+     {tiered_fast_prefix, any},
+     {tiered_slow_prefix, any}];
+
 option_types(read) ->
     [{verify_checksums, bool},
-     {fill_cache, bool}];
+     {fill_cache, bool},
+     {iterator_refresh, bool}];
 option_types(write) ->
      [{sync, bool}].
 
