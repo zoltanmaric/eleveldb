@@ -41,7 +41,10 @@
 -export([iterator/2,
          iterator/3,
          iterator_move/2,
-         iterator_close/1]).
+         iterator_close/1,
+         range_scan/4,
+         range_scan_ack/2,
+         range_scan_fold/6]).
 
 -export_type([db_ref/0,
               itr_ref/0]).
@@ -113,6 +116,12 @@ init() ->
 -type write_actions() :: [{put, Key::binary(), Value::binary()} |
                           {delete, Key::binary()} |
                           clear].
+
+-type range_scan_options() :: [{start_inclusive, boolean()} |
+                               {end_inclusive, boolean()} |
+                               {fill_cache, boolean()} |
+                               {max_batch_size, pos_integer()} |
+                               {max_unacked_bytes, pos_integer()}].
 
 -type iterator_action() :: first | last | next | prev | prefetch | binary().
 
@@ -224,7 +233,59 @@ iterator_close(IRef) ->
 async_iterator_close(_CallerRef, _IRef) ->
     erlang:nif_error({error, not_loaded}).
 
+-spec range_scan(db_ref(), binary(), binary(), range_scan_options()) ->
+    {ok, {itr_ref(), reference()}} | {error, any()}.
+range_scan(_DBRef, _StartKey, _EndKey, _Opts) ->
+    erlang:nif_error({error, not_loaded}).
+
+-spec range_scan_ack(reference(), pos_integer()) -> ok.
+range_scan_ack(_Ref, _NumBytes) ->
+    erlang:nif_error({error, not_loaded}).
+
 -type fold_fun() :: fun(({Key::binary(), Value::binary()}, any()) -> any()).
+
+range_scan_fold(Ref, Fun, Acc0, SKey, EKey, Opts) ->
+    {ok, {MsgRef, AckRef}} = range_scan(Ref, SKey, EKey, Opts),
+    do_range_scan_fold(MsgRef, AckRef, Fun, Acc0).
+
+do_range_scan_batch(<<>>, _Fun, Acc) ->
+    Acc;
+do_range_scan_batch(Bin, Fun, Acc) ->
+    {K, Bin2} = parse_string(Bin),
+    {V, Bin3} = parse_string(Bin2),
+    Acc2 = Fun({K, V}, Acc),
+    do_range_scan_batch(Bin3, Fun, Acc2).
+
+do_range_scan_ack(MsgRef, AckRef, Size, Fun, Acc) ->
+    case range_scan_ack(AckRef, Size) of
+        ok ->
+            do_range_scan_fold(MsgRef, AckRef, Fun, Acc);
+        needs_reack ->
+            do_range_scan_ack(MsgRef, AckRef, 0, Fun, Acc)
+    end.
+
+do_range_scan_fold(MsgRef, AckRef, Fun, Acc) ->
+    receive
+        {range_scan_end, MsgRef} ->
+            Acc;
+        {range_scan_batch, MsgRef, Batch} ->
+            Size = byte_size(Batch),
+            Acc2 = do_range_scan_batch(Batch, Fun, Acc),
+            do_range_scan_ack(MsgRef, AckRef, Size, Fun, Acc2);
+        Msg ->
+            lager:info("Range scan got unexpected message: ~p\n", [Msg])
+    end.
+
+parse_string(Bin) ->
+    parse_string(0, 0, Bin).
+
+parse_string(Size, Shift, <<1:1, N:7, Bin/binary>>) ->
+    Size1 = Size + (N bsl Shift),
+    parse_string(Size1, Shift + 7, Bin);
+parse_string(Size, Shift, <<0:1, N:7, Bin/binary>>) ->
+    Size1 = Size + (N bsl Shift),
+    <<String:Size1/binary, Rest/binary>> = Bin,
+    {String, Rest}.
 
 %% Fold over the keys and values in the database
 %% will throw an exception if the database is closed while the fold runs
@@ -369,7 +430,6 @@ validate_type({_Key, bool}, false)                           -> true;
 validate_type({_Key, integer}, Value) when is_integer(Value) -> true;
 validate_type({_Key, any}, _Value)                           -> true;
 validate_type(_, _)                                          -> false.
-
 
 %% ===================================================================
 %% EUnit tests
