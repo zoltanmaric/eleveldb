@@ -73,10 +73,10 @@ static ErlNifFunc nif_funcs[] =
 
     {"async_iterator", 3, eleveldb::async_iterator},
     {"async_iterator", 4, eleveldb::async_iterator},
-
     {"async_iterator_move", 3, eleveldb::async_iterator_move},
-    {"range_scan", 4, eleveldb::range_scan},
-    {"range_scan_ack", 2, eleveldb::range_scan_ack}
+
+    {"streaming_start", 4, eleveldb::streaming_start},
+    {"streaming_ack", 2, eleveldb::streaming_ack}
 };
 
 
@@ -140,9 +140,10 @@ ERL_NIF_TERM ATOM_START_INCLUSIVE;
 ERL_NIF_TERM ATOM_END_INCLUSIVE;
 ERL_NIF_TERM ATOM_MAX_UNACKED_BYTES;
 ERL_NIF_TERM ATOM_MAX_BATCH_BYTES;
-ERL_NIF_TERM ATOM_RANGE_SCAN_BATCH;
-ERL_NIF_TERM ATOM_RANGE_SCAN_END;
+ERL_NIF_TERM ATOM_STREAMING_BATCH;
+ERL_NIF_TERM ATOM_STREAMING_END;
 ERL_NIF_TERM ATOM_NEEDS_REACK;
+ERL_NIF_TERM ATOM_LIMIT;
 }   // namespace eleveldb
 
 
@@ -481,7 +482,7 @@ ERL_NIF_TERM parse_read_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::ReadO
     return eleveldb::ATOM_OK;
 }
 
-ERL_NIF_TERM parse_range_scan_option(ErlNifEnv* env, ERL_NIF_TERM item,
+ERL_NIF_TERM parse_streaming_option(ErlNifEnv* env, ERL_NIF_TERM item,
                                      eleveldb::RangeScanOptions & opts)
 {
     int arity;
@@ -494,6 +495,8 @@ ERL_NIF_TERM parse_range_scan_option(ErlNifEnv* env, ERL_NIF_TERM item,
             opts.end_inclusive = (option[1] == eleveldb::ATOM_TRUE);
         else if (option[0] == eleveldb::ATOM_FILL_CACHE)
             opts.fill_cache = (option[1] == eleveldb::ATOM_TRUE);
+        else if (option[0] == eleveldb::ATOM_VERIFY_CHECKSUMS)
+            opts.verify_checksums = (option[1] == eleveldb::ATOM_TRUE);
         else if (option[0] == eleveldb::ATOM_MAX_UNACKED_BYTES) {
             unsigned max_unacked_bytes;
             if (enif_get_uint(env, option[1], &max_unacked_bytes))
@@ -791,7 +794,7 @@ async_iterator(
 }   // async_iterator
 
 ERL_NIF_TERM
-range_scan_ack(ErlNifEnv * env,
+streaming_ack(ErlNifEnv * env,
                int argc,
                const ERL_NIF_TERM argv[])
 {
@@ -814,9 +817,9 @@ range_scan_ack(ErlNifEnv * env,
 }
 
 ERL_NIF_TERM
-range_scan(ErlNifEnv * env,
-           int argc,
-           const ERL_NIF_TERM argv[])
+streaming_start(ErlNifEnv * env,
+                int argc,
+                const ERL_NIF_TERM argv[])
 {
     const ERL_NIF_TERM db_ref           = argv[0];
     const ERL_NIF_TERM start_key_term   = argv[1];
@@ -852,7 +855,7 @@ range_scan(ErlNifEnv * env,
     std::string end_key((const char*)end_key_bin.data, end_key_bin.size);
 
     RangeScanOptions opts;
-    fold(env, options_list, parse_range_scan_option, opts);
+    fold(env, options_list, parse_streaming_option, opts);
     
     using eleveldb::RangeScanTask;
     RangeScanTask::SyncHandle * sync_handle =
@@ -1379,9 +1382,10 @@ try
     ATOM(eleveldb::ATOM_END_INCLUSIVE, "end_inclusive");
     ATOM(eleveldb::ATOM_MAX_UNACKED_BYTES, "max_unacked_bytes");
     ATOM(eleveldb::ATOM_MAX_BATCH_BYTES, "max_batch_bytes");
-    ATOM(eleveldb::ATOM_RANGE_SCAN_BATCH, "range_scan_batch");
-    ATOM(eleveldb::ATOM_RANGE_SCAN_END, "range_scan_end");
+    ATOM(eleveldb::ATOM_STREAMING_BATCH, "streaming_batch");
+    ATOM(eleveldb::ATOM_STREAMING_END, "streaming_end");
     ATOM(eleveldb::ATOM_NEEDS_REACK, "needs_reack");
+    ATOM(eleveldb::ATOM_LIMIT, "limit");
 #undef ATOM
 
 

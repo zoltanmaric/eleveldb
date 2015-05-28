@@ -454,7 +454,7 @@ void send_batch(ErlNifPid * pid, ErlNifEnv * msg_env, ERL_NIF_TERM ref_term,
     ERL_NIF_TERM bin_term = enif_make_binary(msg_env, bin);
     ERL_NIF_TERM local_ref = enif_make_copy(msg_env, ref_term);
     ERL_NIF_TERM msg =
-        enif_make_tuple3(msg_env, ATOM_RANGE_SCAN_BATCH, local_ref, bin_term);
+        enif_make_tuple3(msg_env, ATOM_STREAMING_BATCH, local_ref, bin_term);
     enif_send(NULL, pid, msg_env, msg);
     enif_clear_env(msg_env);
 }
@@ -485,6 +485,7 @@ work_result RangeScanTask::operator()()
     ErlNifEnv * env = local_env_;
     ErlNifEnv * msg_env = enif_alloc_env();
     read_options.fill_cache = options_.fill_cache;
+    read_options.verify_checksums = options_.verify_checksums;
     leveldb::Iterator * iter = m_DbPtr->m_Db->NewIterator(read_options);
     const leveldb::Comparator * cmp = m_DbPtr->m_DbOptions->comparator;
     const leveldb::Slice skey_slice(start_key_);
@@ -497,10 +498,12 @@ work_result RangeScanTask::operator()()
     ErlNifBinary bin;
     const size_t initial_bin_size = size_t(options_.max_batch_bytes * 1.1);
     size_t out_offset = 0;
+    size_t num_read = 0;
 
     for (;;) {
         // If reached end or key past end key.
         if (!iter->Valid()
+            || (options_.limit > 0 && options_.limit >= num_read)
             || cmp->Compare(iter->key(), ekey_slice) >= 0) {
             // If data in batch
             if (out_offset) {
@@ -539,12 +542,13 @@ work_result RangeScanTask::operator()()
             sync_obj_->AddBytes(out_offset);
             out_offset = 0;
         }
+        ++num_read;
         iter->Next();
     }
 
     ERL_NIF_TERM ref_copy = enif_make_copy(msg_env, caller_ref_term);
     ERL_NIF_TERM msg =
-        enif_make_tuple2(msg_env, ATOM_RANGE_SCAN_END, ref_copy);
+        enif_make_tuple2(msg_env, ATOM_STREAMING_END, ref_copy);
     enif_send(NULL, &pid, msg_env, msg);
     enif_free_env(msg_env);
     return work_result();
@@ -567,6 +571,7 @@ RangeScanTask::SyncHandle *
 RangeScanTask::CreateSyncHandle(const RangeScanOptions & options)
 {
     SyncObject * sync_obj = new SyncObject(options);
+    sync_obj->RefInc();
     SyncHandle * handle =
         (SyncHandle*)enif_alloc_resource(sync_handle_resource_,
                                          sizeof(SyncHandle));

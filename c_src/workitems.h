@@ -441,13 +441,19 @@ public:
 struct RangeScanOptions {
   size_t max_unacked_bytes;
   size_t max_batch_bytes;
+  // Max number of items to return. Zero means unlimited.
+  size_t limit;
   bool start_inclusive;
   bool end_inclusive;
+  // Read options
   bool fill_cache;
+  bool verify_checksums;
 
   RangeScanOptions()
     : max_unacked_bytes(10 * 1024 * 1024), max_batch_bytes(1 * 1024 * 1024),
-    start_inclusive(true), end_inclusive(false), fill_cache(false)
+    limit(0),
+    start_inclusive(true), end_inclusive(false),
+    fill_cache(false), verify_checksums(true)
   { }
 };
 
