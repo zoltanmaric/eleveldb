@@ -507,7 +507,7 @@ work_result RangeScanTask::operator()()
     for (;;) {
         // If reached end or key past end key.
         if (!iter->Valid()
-            || (options_.limit > 0 && options_.limit >= num_read)
+            || (options_.limit > 0 && num_read >= options_.limit)
             || (has_end_key_ && cmp->Compare(iter->key(), ekey_slice) >= 0)) {
             // If data in batch
             if (out_offset) {

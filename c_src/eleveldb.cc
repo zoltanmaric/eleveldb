@@ -506,6 +506,10 @@ ERL_NIF_TERM parse_streaming_option(ErlNifEnv* env, ERL_NIF_TERM item,
             unsigned max_batch_bytes;
             if (enif_get_uint(env, option[1], &max_batch_bytes))
                 opts.max_batch_bytes = max_batch_bytes;
+        } else if (option[0] == eleveldb::ATOM_LIMIT) {
+            unsigned limit;
+            if (enif_get_uint(env, option[1], &limit))
+                opts.limit = limit;
         }
     }
 
