@@ -504,11 +504,22 @@ work_result RangeScanTask::operator()()
     size_t out_offset = 0;
     size_t num_read = 0;
 
+    // If not including first key and first key exists, skip
+    if (!options_.start_inclusive
+        && iter->Valid()
+        && cmp->Compare(iter->key(), skey_slice) == 0) {
+        iter->Next();
+    }
+
     for (;;) {
         // If reached end or key past end key.
         if (!iter->Valid()
             || (options_.limit > 0 && num_read >= options_.limit)
-            || (has_end_key_ && cmp->Compare(iter->key(), ekey_slice) >= 0)) {
+            || (has_end_key_ &&
+                (options_.end_inclusive ?
+                 cmp->Compare(iter->key(), ekey_slice) > 0 :
+                 cmp->Compare(iter->key(), ekey_slice) >= 0
+                ))) {
             // If data in batch
             if (out_offset) {
                 // Shrink it to final size.
