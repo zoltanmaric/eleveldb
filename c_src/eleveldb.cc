@@ -144,6 +144,7 @@ ERL_NIF_TERM ATOM_STREAMING_BATCH;
 ERL_NIF_TERM ATOM_STREAMING_END;
 ERL_NIF_TERM ATOM_NEEDS_REACK;
 ERL_NIF_TERM ATOM_LIMIT;
+ERL_NIF_TERM ATOM_UNDEFINED;
 }   // namespace eleveldb
 
 
@@ -829,9 +830,11 @@ streaming_start(ErlNifEnv * env,
     ReferencePtr<DbObject> db_ptr;
     db_ptr.assign(DbObject::RetrieveDbObject(env, db_ref));
 
+    bool has_end_key = enif_is_binary(env, end_key_term);
+
     if (NULL == db_ptr.get()
         || !enif_is_binary(env, start_key_term)
-        || !enif_is_binary(env, end_key_term)
+        || (!has_end_key && eleveldb::ATOM_UNDEFINED != end_key_term)
         || !enif_is_list(env, options_list))
     {
         return enif_make_badarg(env);
@@ -843,16 +846,17 @@ streaming_start(ErlNifEnv * env,
     ERL_NIF_TERM reply_ref = enif_make_ref(env);
 
     ErlNifBinary start_key_bin;
-    ErlNifBinary end_key_bin;
     enif_inspect_binary(env, start_key_term, &start_key_bin);
-    enif_inspect_binary(env, end_key_term, &end_key_bin);
-    leveldb::Slice start_key_slice((const char *)start_key_bin.data,
-                                   start_key_bin.size);
-    leveldb::Slice end_key_slice((const char *)end_key_bin.data,
-                                 end_key_bin.size);
-
     std::string start_key((const char*)start_key_bin.data, start_key_bin.size);
-    std::string end_key((const char*)end_key_bin.data, end_key_bin.size);
+
+    std::string * end_key_ptr = NULL;
+    std::string end_key;
+    if (has_end_key) {
+        ErlNifBinary end_key_bin;
+        enif_inspect_binary(env, end_key_term, &end_key_bin);
+        end_key.assign((const char*)end_key_bin.data, end_key_bin.size);
+        end_key_ptr = &end_key;
+    }
 
     RangeScanOptions opts;
     fold(env, options_list, parse_streaming_option, opts);
@@ -865,7 +869,7 @@ streaming_start(ErlNifEnv * env,
 
     RangeScanTask * task =
         new RangeScanTask(env, reply_ref, db_ptr.get(),
-                          start_key, end_key, opts, sync_handle->sync_obj);
+                          start_key, end_key_ptr, opts, sync_handle->sync_obj);
 
     eleveldb_priv_data& priv =
         *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
@@ -1386,6 +1390,7 @@ try
     ATOM(eleveldb::ATOM_STREAMING_END, "streaming_end");
     ATOM(eleveldb::ATOM_NEEDS_REACK, "needs_reack");
     ATOM(eleveldb::ATOM_LIMIT, "limit");
+    ATOM(eleveldb::ATOM_UNDEFINED, "undefined");
 #undef ATOM
 
 

@@ -363,14 +363,18 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
                              ERL_NIF_TERM caller_ref,
                              DbObject * db_handle,
                              const std::string & start_key,
-                             const std::string & end_key,
+                             const std::string * end_key,
                              RangeScanOptions & options,
                              SyncObject * sync_obj)
 : WorkTask(caller_env, caller_ref, db_handle),
     options_(options),
-    start_key_(start_key), end_key_(end_key),
+    start_key_(start_key),
+    has_end_key_(bool(end_key)),
     sync_obj_(sync_obj)
 {
+    if (end_key) {
+        end_key_ = *end_key;
+    }
     sync_obj_->RefInc();
 }
 
@@ -504,7 +508,7 @@ work_result RangeScanTask::operator()()
         // If reached end or key past end key.
         if (!iter->Valid()
             || (options_.limit > 0 && options_.limit >= num_read)
-            || cmp->Compare(iter->key(), ekey_slice) >= 0) {
+            || (has_end_key_ && cmp->Compare(iter->key(), ekey_slice) >= 0)) {
             // If data in batch
             if (out_offset) {
                 // Shrink it to final size.

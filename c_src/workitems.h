@@ -507,7 +507,7 @@ public:
                   ERL_NIF_TERM caller_ref,
                   DbObject * db_handle,
                   const std::string & start_key,
-                  const std::string & end_key,
+                  const std::string * end_key,
                   RangeScanOptions & options,
                   SyncObject * sync_obj);
 
@@ -525,6 +525,7 @@ protected:
     RangeScanOptions options_;
     std::string start_key_;
     std::string end_key_;
+    bool has_end_key_;
     SyncObject * sync_obj_;
 
 };  // class RangeScanTask
