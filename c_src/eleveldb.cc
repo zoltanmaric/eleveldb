@@ -142,7 +142,6 @@ ERL_NIF_TERM ATOM_MAX_UNACKED_BYTES;
 ERL_NIF_TERM ATOM_MAX_BATCH_BYTES;
 ERL_NIF_TERM ATOM_STREAMING_BATCH;
 ERL_NIF_TERM ATOM_STREAMING_END;
-ERL_NIF_TERM ATOM_NEEDS_REACK;
 ERL_NIF_TERM ATOM_LIMIT;
 ERL_NIF_TERM ATOM_UNDEFINED;
 }   // namespace eleveldb
@@ -817,8 +816,9 @@ streaming_ack(ErlNifEnv * env,
     if (!sync_handle || !sync_handle->sync_obj)
         return enif_make_badarg(env);
 
-    bool needs_reack = sync_handle->sync_obj->AckBytes(num_bytes);
-    return needs_reack ? eleveldb::ATOM_NEEDS_REACK : eleveldb::ATOM_OK;
+    sync_handle->sync_obj->AckBytes(num_bytes);
+
+    return eleveldb::ATOM_OK;
 }
 
 ERL_NIF_TERM
@@ -1392,7 +1392,6 @@ try
     ATOM(eleveldb::ATOM_MAX_BATCH_BYTES, "max_batch_bytes");
     ATOM(eleveldb::ATOM_STREAMING_BATCH, "streaming_batch");
     ATOM(eleveldb::ATOM_STREAMING_END, "streaming_end");
-    ATOM(eleveldb::ATOM_NEEDS_REACK, "needs_reack");
     ATOM(eleveldb::ATOM_LIMIT, "limit");
     ATOM(eleveldb::ATOM_UNDEFINED, "undefined");
 #undef ATOM

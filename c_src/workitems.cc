@@ -384,9 +384,11 @@ RangeScanTask::~RangeScanTask()
 }
 
 RangeScanTask::SyncObject::SyncObject(const RangeScanOptions & opts)
-: max_bytes_(opts.max_unacked_bytes), num_bytes_(0),
+: max_bytes_(opts.max_unacked_bytes),
+    low_bytes_(opts.low_bytes),
+    num_bytes_(0),
     producer_sleeping_(false), pending_signal_(false), consumer_dead_(false),
-    mutex_(NULL), cond_(NULL)
+    crossed_under_max_(false), mutex_(NULL), cond_(NULL)
 {
     mutex_ = enif_mutex_create(0);
     cond_ = enif_cond_create(0);
@@ -401,46 +403,41 @@ RangeScanTask::SyncObject::~SyncObject()
 void RangeScanTask::SyncObject::AddBytes(uint32_t n)
 {
     uint32_t num_bytes = add_and_fetch(&num_bytes_, n);
-    // Block if max bytes reached.
+    // Block if buffer full.
     if (num_bytes >= max_bytes_) {
         enif_mutex_lock(mutex_);
-        if (!consumer_dead_) {
+        if (!consumer_dead_ && !pending_signal_) {
             producer_sleeping_ = true;
             while (producer_sleeping_) {
                 enif_cond_wait(cond_, mutex_);
             }
         }
+        if (pending_signal_)
+            pending_signal_ = false;
         enif_mutex_unlock(mutex_);
     }
 }
 
-bool RangeScanTask::SyncObject::AckBytes(uint32_t n)
+void RangeScanTask::SyncObject::AckBytes(uint32_t n)
 {
     uint32_t num_bytes = sub_and_fetch(&num_bytes_, n);
-    bool ret;
 
-    const bool is_reack = n == 0;
-    const bool is_under_max = num_bytes < max_bytes_;
-    const bool was_over_max = num_bytes_ + n >= max_bytes_;
-    const bool went_under_max = is_under_max && was_over_max;
+    if (num_bytes < max_bytes_ && num_bytes_ + n >= max_bytes_)
+        crossed_under_max_ = true;
 
-    if (went_under_max || is_reack) {
+    // Detect if at some point buffer was full, but now we have
+    // acked enough bytes to go under the low watermark.
+    if (crossed_under_max_ && num_bytes < low_bytes_) {
+        crossed_under_max_ = false;
         enif_mutex_lock(mutex_);
         if (producer_sleeping_) {
             producer_sleeping_ = false;
             enif_cond_signal(cond_);
-            ret = false;
         } else {
-            // Producer crossed the threshold, but we caught it before it 
-            // blocked. Pending a cond signal to wake it when it does.
             pending_signal_ = true;
-            ret = true;
         }
         enif_mutex_unlock(mutex_);
-    } else 
-        ret = false;
-
-    return ret;
+    }
 }
 
 void RangeScanTask::SyncObject::MarkConsumerDead() {
@@ -451,6 +448,9 @@ void RangeScanTask::SyncObject::MarkConsumerDead() {
     enif_mutex_unlock(mutex_);
 }
 
+bool RangeScanTask::SyncObject::IsConsumerDead() const {
+    return consumer_dead_;
+}
 
 void send_batch(ErlNifPid * pid, ErlNifEnv * msg_env, ERL_NIF_TERM ref_term,
                 ErlNifBinary * bin) {
@@ -511,7 +511,7 @@ work_result RangeScanTask::operator()()
         iter->Next();
     }
 
-    for (;;) {
+    while (!sync_obj_->IsConsumerDead()) {
         // If reached end or key past end key.
         if (!iter->Valid()
             || (options_.limit > 0 && num_read >= options_.limit)
@@ -526,6 +526,7 @@ work_result RangeScanTask::operator()()
                 if (out_offset != bin.size)
                     enif_realloc_binary(&bin, out_offset);
                 send_batch(&pid, msg_env, caller_ref_term, &bin);
+                out_offset = 0;
             }
             break;
         }
@@ -561,10 +562,16 @@ work_result RangeScanTask::operator()()
         iter->Next();
     }
 
-    ERL_NIF_TERM ref_copy = enif_make_copy(msg_env, caller_ref_term);
-    ERL_NIF_TERM msg =
-        enif_make_tuple2(msg_env, ATOM_STREAMING_END, ref_copy);
-    enif_send(NULL, &pid, msg_env, msg);
+    if (!sync_obj_->IsConsumerDead()) {
+        ERL_NIF_TERM ref_copy = enif_make_copy(msg_env, caller_ref_term);
+        ERL_NIF_TERM msg =
+            enif_make_tuple2(msg_env, ATOM_STREAMING_END, ref_copy);
+        enif_send(NULL, &pid, msg_env, msg);
+    }
+
+    if (out_offset)
+        enif_release_binary(&bin);
+
     enif_free_env(msg_env);
     return work_result();
 }   // RangeScanTask::operator()

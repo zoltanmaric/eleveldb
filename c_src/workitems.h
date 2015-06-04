@@ -440,6 +440,7 @@ public:
 
 struct RangeScanOptions {
   size_t max_unacked_bytes;
+  size_t low_bytes;
   size_t max_batch_bytes;
   // Max number of items to return. Zero means unlimited.
   size_t limit;
@@ -450,7 +451,9 @@ struct RangeScanOptions {
   bool verify_checksums;
 
   RangeScanOptions()
-    : max_unacked_bytes(10 * 1024 * 1024), max_batch_bytes(1 * 1024 * 1024),
+    : max_unacked_bytes(10 * 1024 * 1024),
+    low_bytes(2 * 1024 * 1024),
+    max_batch_bytes(1 * 1024 * 1024),
     limit(0),
     start_inclusive(true), end_inclusive(false),
     fill_cache(false), verify_checksums(true)
@@ -480,21 +483,25 @@ public:
             // side to shut down.
             void AddBytes(uint32_t n);
 
-            // Returns true if num bytes was over the max, so that producer
-            // has gone or will go to sleep waiting on ack. Consumer *needs*
-            // to signal it or it will sleep forever.
-            bool AckBytes(uint32_t n);
+            void AckBytes(uint32_t n);
 
             // Should be called when the Erlang handle is garbage collected
             // so no process is there to consume the output.
             void MarkConsumerDead();
 
+            bool IsConsumerDead() const;
+
         private:
             const uint32_t max_bytes_;
+            const uint32_t low_bytes_;
             volatile uint32_t num_bytes_;
-            volatile bool producer_sleeping_;
+            bool producer_sleeping_;
+            // Set if producer filled up but consumer acked before
+            // producer went to sleep. Producer should abort going to 
+            // sleep upon seeing this set.
             volatile bool pending_signal_;
             volatile bool consumer_dead_;
+            volatile bool crossed_under_max_;
             ErlNifMutex * mutex_;
             ErlNifCond * cond_;
     };

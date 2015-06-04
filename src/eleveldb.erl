@@ -267,22 +267,15 @@ do_streaming_batch(Bin, Fun, Acc) ->
     Acc2 = Fun({K, V}, Acc),
     do_streaming_batch(Bin3, Fun, Acc2).
 
-do_streaming_ack(StreamRef = {_, AckRef}, Size, Fun, Acc) ->
-    case streaming_ack(AckRef, Size) of
-        ok ->
-            do_streaming_fold(StreamRef, Fun, Acc);
-        needs_reack ->
-            do_streaming_ack(StreamRef, 0, Fun, Acc)
-    end.
-
-do_streaming_fold(StreamRef = {MsgRef, _}, Fun, Acc) ->
+do_streaming_fold(StreamRef = {MsgRef, AckRef}, Fun, Acc) ->
     receive
         {streaming_end, MsgRef} ->
             Acc;
         {streaming_batch, MsgRef, Batch} ->
             Size = byte_size(Batch),
             Acc2 = do_streaming_batch(Batch, Fun, Acc),
-            do_streaming_ack(StreamRef, Size, Fun, Acc2)
+            _ = streaming_ack(AckRef, Size),
+            do_streaming_fold(StreamRef, Fun, Acc2)
     end.
 
 parse_string(Bin) ->
