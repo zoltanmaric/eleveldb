@@ -76,7 +76,8 @@ static ErlNifFunc nif_funcs[] =
     {"async_iterator_move", 3, eleveldb::async_iterator_move},
 
     {"streaming_start", 4, eleveldb::streaming_start},
-    {"streaming_ack", 2, eleveldb::streaming_ack}
+    {"streaming_ack", 2, eleveldb::streaming_ack},
+    {"streaming_stop", 1, eleveldb::streaming_stop}
 };
 
 
@@ -821,6 +822,24 @@ streaming_ack(ErlNifEnv * env,
     return eleveldb::ATOM_OK;
 }
 
+ERL_NIF_TERM
+streaming_stop(ErlNifEnv * env,
+               int argc,
+               const ERL_NIF_TERM argv[])
+{
+    const ERL_NIF_TERM ref              = argv[0];
+
+    using eleveldb::RangeScanTask;
+    RangeScanTask::SyncHandle * sync_handle;
+    sync_handle = RangeScanTask::RetrieveSyncHandle(env, ref);
+
+    if (!sync_handle)
+        return enif_make_badarg(env);
+
+    RangeScanTask::SyncHandleResourceCleanup(env, sync_handle);
+
+    return eleveldb::ATOM_OK;
+}
 ERL_NIF_TERM
 streaming_start(ErlNifEnv * env,
                 int argc,

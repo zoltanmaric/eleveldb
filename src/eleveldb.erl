@@ -257,6 +257,10 @@ streaming_start(_DBRef, _StartKey, _EndKey, _Opts) ->
 streaming_ack(_AckRef, _NumBytes) ->
     erlang:nif_error({error, not_loaded}).
 
+-spec streaming_stop(binary()) -> ok.
+streaming_stop(_AckRef) ->
+    erlang:nif_error({error, not_loaded}).
+
 -type fold_fun() :: fun(({Key::binary(), Value::binary()}, any()) -> any()).
 
 do_streaming_batch(<<>>, _Fun, Acc) ->
@@ -301,7 +305,13 @@ fold(Ref, Fun, Acc0, Opts) ->
             SKey = proplists:get_value(first_key, Opts, <<>>),
             EKey = proplists:get_value(last_key, Opts),
             {ok, StreamRef} = streaming_start(Ref, SKey, EKey, Opts),
-            do_streaming_fold(StreamRef, Fun, Acc0)
+            {_, AckRef} = StreamRef,
+            try
+                do_streaming_fold(StreamRef, Fun, Acc0)
+            after
+                %% Close early, do not wait for garbage collection.
+                streaming_stop(AckRef)
+            end
     end.
 
 -type fold_keys_fun() :: fun((Key::binary(), any()) -> any()).
