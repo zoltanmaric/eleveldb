@@ -889,6 +889,8 @@ streaming_start(ErlNifEnv * env,
         RangeScanTask::CreateSyncHandle(opts);
 
     ERL_NIF_TERM sync_ref = enif_make_resource(env, sync_handle);
+    // Release so it's destroyed on GC.
+    enif_release_resource(sync_handle);
 
     RangeScanTask * task =
         new RangeScanTask(env, reply_ref, db_ptr.get(),
