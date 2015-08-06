@@ -443,8 +443,10 @@ void RangeScanTask::SyncObject::AckBytes(uint32_t n)
 void RangeScanTask::SyncObject::MarkConsumerDead() {
     enif_mutex_lock(mutex_);
     consumer_dead_ = true;
-    if (producer_sleeping_)
+    if (producer_sleeping_) {
+        producer_sleeping_ = false;
         enif_cond_signal(cond_);
+    }
     enif_mutex_unlock(mutex_);
 }
 
