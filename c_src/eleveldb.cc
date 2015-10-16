@@ -145,6 +145,7 @@ ERL_NIF_TERM ATOM_STREAMING_BATCH;
 ERL_NIF_TERM ATOM_STREAMING_END;
 ERL_NIF_TERM ATOM_LIMIT;
 ERL_NIF_TERM ATOM_UNDEFINED;
+ERL_NIF_TERM ATOM_BIGSETS;
 }   // namespace eleveldb
 
 
@@ -460,7 +461,13 @@ ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Optio
             if (0<ret_val && ret_val<256)
                 opts.tiered_slow_prefix = buffer;
         }
-
+        else if (option[0] == eleveldb::ATOM_BIGSETS)
+        {
+            if (option[1] == eleveldb::ATOM_TRUE)
+            {
+                opts.comparator = leveldb::GetBSComparator();
+            }
+        }
     }
 
     return eleveldb::ATOM_OK;
@@ -1415,6 +1422,7 @@ try
     ATOM(eleveldb::ATOM_STREAMING_END, "streaming_end");
     ATOM(eleveldb::ATOM_LIMIT, "limit");
     ATOM(eleveldb::ATOM_UNDEFINED, "undefined");
+    ATOM(eleveldb::ATOM_BIGSETS, "bigsets");
 #undef ATOM
 
 
