@@ -2,8 +2,6 @@
 #define extractor_h
 
 #include <stdint.h>
-#include <stdint.h>
-#include <stdint.h>
 #include <map>
 #include <string>
 #include <set>
