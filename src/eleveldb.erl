@@ -41,7 +41,8 @@
          parse_string/1,
          is_empty/1,
 	 encode/2,
-	 current_usec/0]).
+	 current_usec/0,
+	 profile/1]).
 
 %% for testing
 -export([
@@ -222,8 +223,10 @@ write(Ref, Updates, Opts) ->
 
 -spec async_put(db_ref(), reference(), binary(), binary(), write_options()) -> ok.
 async_put(Ref, Context, Key, Value, Opts) ->
+    eleveldb:profile({start, 9}),
     Updates = [{put, Key, Value}],
     async_write(Context, Ref, Updates, Opts),
+    eleveldb:profile({stop, 9}),
     ok.
 
 -spec async_write(reference(), db_ref(), write_actions(), write_options()) -> ok.
@@ -331,6 +334,9 @@ do_streaming_fold_test1(StreamRef = {MsgRef, AckRef}, Fun, Acc) ->
     end.
 
 current_usec() ->
+    erlang:nif_error({error, not_loaded}).
+
+profile(_Tuple) ->
     erlang:nif_error({error, not_loaded}).
 
 parse_string(Bin) ->
