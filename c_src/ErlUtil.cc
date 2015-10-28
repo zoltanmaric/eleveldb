@@ -4,6 +4,8 @@
 #include "cmp.h"
 #include "cmp_mem_access.h"
 
+#include "exceptionutils.h"
+
 #include <cctype>
 #include <climits>
 #include <cmath>
@@ -1012,7 +1014,7 @@ double ErlUtil::getValAsDouble(ErlNifEnv* env, ERL_NIF_TERM term, bool exact)
 /**.......................................................................
  * Format an erlang value
  */
-std::string ErlUtil::formatTerm(ErlNifEnv* env, ERL_NIF_TERM term)
+std::string ErlUtil::formatTerm(ErlNifEnv* env, ERL_NIF_TERM term, bool binAsString)
 {
     if(isAtom(env, term)) {
         return formatAtom(env, term);
@@ -1023,11 +1025,19 @@ std::string ErlUtil::formatTerm(ErlNifEnv* env, ERL_NIF_TERM term)
     }
 
     if(isTuple(env, term)) {
-        return formatTuple(env, term);
+        return formatTuple(env, term, binAsString);
     }
 
     if(isBinary(env, term)) {
-        return formatBinary(env, term);
+        if(binAsString) {
+            try {
+                return formatBinaryAsString(env, term);
+            } catch(...) {
+                return formatBinary(env, term);
+            }
+        } else {
+            return formatBinary(env, term);
+        }
     }
 
     if(isString(env, term)) {
@@ -1035,7 +1045,7 @@ std::string ErlUtil::formatTerm(ErlNifEnv* env, ERL_NIF_TERM term)
     }
 
     if(isList(env, term)) {
-        return formatList(env, term);
+        return formatList(env, term, binAsString);
     }
 
     return "?";
@@ -1094,14 +1104,22 @@ std::string ErlUtil::formatString(ErlNifEnv* env, ERL_NIF_TERM term)
     return os.str();
 }
 
-std::string ErlUtil::formatList(ErlNifEnv* env, ERL_NIF_TERM term)
+std::string ErlUtil::formatBinaryAsString(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    std::ostringstream os;
+    os << "\"" << getBinaryAsString(env, term) << "\"";
+
+    return os.str();
+}
+
+std::string ErlUtil::formatList(ErlNifEnv* env, ERL_NIF_TERM term, bool binAsString)
 {
     std::vector<ERL_NIF_TERM> cells = getListCells(env, term);
     std::ostringstream os;
 
     os << "[";
     for(unsigned iCell=0; iCell < cells.size(); iCell++) {
-        os << formatTerm(env, cells[iCell]);
+        os << formatTerm(env, cells[iCell], binAsString);
         if(iCell < cells.size()-1)
             os << ", ";
     }
@@ -1144,13 +1162,26 @@ std::string ErlUtil::formatBinary(unsigned char* buf, size_t size)
     return os.str();
 }
 
-std::string ErlUtil::formatTupleVec(ErlNifEnv* env, std::vector<ERL_NIF_TERM>& cells)
+std::string ErlUtil::formatBinaryAsString(unsigned char* buf, size_t size)
+{
+    std::ostringstream os;
+
+    os << "\"";
+    for(unsigned iByte=0; iByte < size; iByte++) {
+        os << (char)buf[iByte];
+    }
+    os << "\"";
+
+    return os.str();
+}
+
+std::string ErlUtil::formatTupleVec(ErlNifEnv* env, std::vector<ERL_NIF_TERM>& cells, bool binAsString)
 {
     std::ostringstream os;
     
     os << "{";
     for(unsigned iCell=0; iCell < cells.size(); iCell++) {
-        os << formatTerm(env, cells[iCell]);
+        os << formatTerm(env, cells[iCell], binAsString);
         if(iCell < cells.size()-1)
             os << ", ";
     }
@@ -1160,9 +1191,8 @@ std::string ErlUtil::formatTupleVec(ErlNifEnv* env, std::vector<ERL_NIF_TERM>& c
     return os.str();
 }
 
-std::string ErlUtil::formatTuple(ErlNifEnv* env, ERL_NIF_TERM term)
+std::string ErlUtil::formatTuple(ErlNifEnv* env, ERL_NIF_TERM term, bool binAsString)
 {
     std::vector<ERL_NIF_TERM> cells = getTupleCells(env, term);
-    return formatTupleVec(env, cells);
+    return formatTupleVec(env, cells, binAsString);
 }
-

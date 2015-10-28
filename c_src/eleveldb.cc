@@ -37,6 +37,7 @@
 
 #include "CmpUtil.h"
 #include "ErlUtil.h"
+#include "Profiler.h"
 
 #include "leveldb/db.h"
 #include "leveldb/env.h"
@@ -83,6 +84,7 @@ static ErlNifFunc nif_funcs[] =
     {"streaming_stop", 1, eleveldb::streaming_stop},
 
     {"current_usec",   0, eleveldb::currentMicroSeconds},
+    {"profile",        1, eleveldb::profile},
 };
 
 
@@ -1168,6 +1170,9 @@ streaming_start(ErlNifEnv * env,
         fold(env, options_list, parse_streaming_option, opts);
         opts.checkOptions();
 
+        FOUT("Inside streaming_start.  Got options list: " 
+             << ErlUtil::formatTerm(env, options_list, true));
+
     } catch(std::runtime_error& err) {
 	ERL_NIF_TERM msg_str  = enif_make_string(env, err.what(), ERL_NIF_LATIN1);
         return enif_make_tuple3(env, eleveldb::ATOM_ERROR, reply_ref, msg_str);
@@ -1246,6 +1251,54 @@ currentMicroSeconds(
 {
   return enif_make_int64(env, getCurrentMicroSeconds());
 } // currentMicroSeconds
+
+ERL_NIF_TERM
+profile(
+    ErlNifEnv* env,
+    int argc,
+    const ERL_NIF_TERM argv[])
+{
+    try {
+
+        std::vector<ERL_NIF_TERM> cells = ErlUtil::getTupleCells(env, argv[0]);
+        std::string atom  = ErlUtil::formatTerm(env, cells[0]);
+
+        //------------------------------------------------------------
+        // Format a list of tuples and return as protobuf-encoded
+        // binary
+        //------------------------------------------------------------
+        
+        if(atom == "resize") {
+            Profiler::get()->resize(ErlUtil::getValAsUint32(env, cells[1]));
+            return eleveldb::ATOM_OK;
+        }
+
+        if(atom == "start") {
+            Profiler::get()->start(ErlUtil::getValAsUint32(env, cells[1]));
+            return eleveldb::ATOM_OK;
+        }
+
+        if(atom == "stop") {
+            Profiler::get()->stop(ErlUtil::getValAsUint32(env, cells[1]));
+            return eleveldb::ATOM_OK;
+        }
+
+        if(atom == "dump") {
+            Profiler::get()->append(ErlUtil::getAsString(env, cells[1]));
+            return eleveldb::ATOM_OK;
+        }
+
+	ERL_NIF_TERM msg_str  = enif_make_string(env, "Unexpected atom received", ERL_NIF_LATIN1);
+        return enif_make_tuple2(env, eleveldb::ATOM_ERROR, msg_str);
+
+    } catch(std::runtime_error& err) {
+	ERL_NIF_TERM msg_str  = enif_make_string(env, err.what(), ERL_NIF_LATIN1);
+        return enif_make_tuple2(env, eleveldb::ATOM_ERROR, msg_str);
+    } catch(...) {
+	ERL_NIF_TERM msg_str  = enif_make_string(env, "Unhandled exception caught", ERL_NIF_LATIN1);
+        return enif_make_tuple2(env, eleveldb::ATOM_ERROR, msg_str);
+    }
+}
 
 ERL_NIF_TERM
 async_destroy(
@@ -1528,3 +1581,4 @@ catch(...)
 extern "C" {
     ERL_NIF_INIT(eleveldb, nif_funcs, &on_load, NULL, NULL, &on_unload);
 }
+

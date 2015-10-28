@@ -13,9 +13,9 @@
  * @author /bin/bash: username: command not found
  */
 #include "erl_nif.h"
-#include "workitems.h"
 
 #include<string>
+#include<vector>
 
 #define MIN_BUF_SIZE 1024
 
@@ -131,18 +131,20 @@ namespace eleveldb {
         static uint64_t getValAsUint64(ErlNifEnv* env, ERL_NIF_TERM term, bool exact=true);
         static double   getValAsDouble(ErlNifEnv* env, ERL_NIF_TERM term, bool exact=true);
 
-        static std::string formatTerm(ErlNifEnv* env, ERL_NIF_TERM term);
+        static std::string formatTerm(ErlNifEnv* env, ERL_NIF_TERM term, bool binAsString=false);
 
         static std::string formatAtom(  ErlNifEnv* env, ERL_NIF_TERM term);
         static std::string formatBinary(ErlNifEnv* env, ERL_NIF_TERM term);
 
         static std::string formatBinary(unsigned char* buf, size_t size);
+        static std::string formatBinaryAsString(unsigned char* buf, size_t size);
+        static std::string formatBinaryAsString(ErlNifEnv* env, ERL_NIF_TERM term);
 
-        static std::string formatList(  ErlNifEnv* env, ERL_NIF_TERM term);
+        static std::string formatList(  ErlNifEnv* env, ERL_NIF_TERM term, bool binAsString=false);
         static std::string formatNumber(ErlNifEnv* env, ERL_NIF_TERM term);
         static std::string formatString(ErlNifEnv* env, ERL_NIF_TERM term);
-        static std::string formatTuple( ErlNifEnv* env, ERL_NIF_TERM term);
-        static std::string formatTupleVec(ErlNifEnv* env, std::vector<ERL_NIF_TERM>& tuple);
+        static std::string formatTuple( ErlNifEnv* env, ERL_NIF_TERM term, bool binAsString=false);
+        static std::string formatTupleVec(ErlNifEnv* env, std::vector<ERL_NIF_TERM>& tuple, bool binAsString=false);
 
     private:
 
