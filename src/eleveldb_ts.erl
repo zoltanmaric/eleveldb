@@ -8,6 +8,9 @@
 
 -ifdef(TEST).
 -compile(export_all).
+-ifdef(EQC).
+-include_lib("eqc/include/eqc.hrl").
+-endif.
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
@@ -77,6 +80,61 @@ simple_decode_record_test() ->
     Got = decode_record(Rec),
     Exp = [{<<"field_1">>, 123}, {<<"field_2">>, "abdce"}],
     ?assertEqual(Exp, Got).
-    
+
+
+-ifdef(EQC).
+
+%% Ensure that the encoded keys appear in the same sorted order as the
+%% logical data.  Generate a schema from float/int/binary types with
+%% zero or more prefix types, a timestamp type and zero or more suffix
+%% types then generate a list of possible entries for that schema
+%% and check the encoded and unencoded data is in the same order.
+
+-define(QC_OUT(P),
+        eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
+
+maybe_null(G) ->
+    %% fun() -> oneof([return([]), G]) end. - breaks encode_k2, so skip for now
+    G.
+
+type() ->
+    oneof([{float, maybe_null(fun eqc_gen:real/0)},
+           {int, maybe_null(fun eqc_gen:nat/0)}, % be really kind, only do positive ints, should be largeint()
+           {binary, maybe_null(fun eqc_gen:binary/0)},
+           {binary, maybe_null(fun() -> list(char()) end)}
+]).
+
+schema() ->
+    %% ?LET({Before, After}, {list(type()), list(type())},
+    %%      Before ++ [{timestamp, fun eqc_gen:largeint/0}] ++ After).
+    ?LET({Before, After}, {list(type()), list(type())},
+         Before ++ [{timestamp, fun eqc_gen:largeint/0}] ++ After).
+
+key(Schema) ->
+    [{T, G()} || {T, G} <- Schema].
+
+keys() ->
+    ?LET(S, schema(), non_empty(list(key(S)))).
+
+prop_ordered() ->
+    ?TRAPEXIT(
+       ?FORALL(Keys0, keys(),
+            begin
+                Keys = lists:usort(Keys0),
+                Seq = lists:seq(1, length(Keys)),
+                KeySeq = lists:zip(Keys, Seq),
+                %%BinKeySeq = lists:sort([{sext:encode(K), S} || {K, S} <- KeySeq]),
+                BinKeySeq = lists:sort([{encode_key(K), S} || {K, S} <- KeySeq]),
+                {_, BinSeq} = lists:unzip(BinKeySeq),
+                ?WHENFAIL(
+                   eqc:format("KeySeq = ~p\nBinKeySeq = ~p\n", [KeySeq, BinKeySeq]),
+                   equals(BinSeq, Seq))
+            end)).
+
+eqc_test() ->
+    ?assert(eqc:quickcheck(eqc:testing_time(15, ?QC_OUT(prop_ordered())))).
+
+-endif.
+
 
 -endif.
