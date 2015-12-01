@@ -710,7 +710,8 @@ async_write(
     const ERL_NIF_TERM& handle_ref = argv[1];
     const ERL_NIF_TERM& action_ref = argv[2];
     const ERL_NIF_TERM& opts_ref   = argv[3];
-    ERL_NIF_TERM ret_term;
+
+    bool non_blocking;
 
     ReferencePtr<DbObject> db_ptr;
 
@@ -727,29 +728,50 @@ async_write(
     if(NULL == db_ptr->m_Db)
         return error_einval(env);
 
-    // Construct a write batch:
-    leveldb::WriteBatch* batch = new leveldb::WriteBatch;
 
-    // Seed the batch's data:
-    ERL_NIF_TERM result = fold(env, argv[2], write_batch_item, *batch);
-    if(eleveldb::ATOM_OK != result)
+
+    non_blocking=db_ptr->m_Db->RequestNonBlockTicket();
+    if (non_blocking)
     {
-        return enif_make_tuple3(env, eleveldb::ATOM_ERROR, caller_ref,
-                                enif_make_tuple2(env, eleveldb::ATOM_BAD_WRITE_ACTION,
-                                                 result));
-    }   // if
+        // use stack if calling direct :-)
+        leveldb::WriteOptions opts;
+        leveldb::WriteBatch batch;
 
-    leveldb::WriteOptions* opts = new leveldb::WriteOptions;
-    fold(env, argv[3], parse_write_option, *opts);
+        fold(env, argv[3], parse_write_option, opts);
+        opts.non_blocking=true;
 
-    opts->non_blocking=db_ptr->m_Db->RequestNonBlockTicket();
-    if (opts->non_blocking)
-    {
-        leveldb::Status status = db_ptr->m_Db->Write(*opts, batch);
+        // Seed the batch's data:
+        ERL_NIF_TERM result = fold(env, argv[2], write_batch_item, batch);
+        if(eleveldb::ATOM_OK != result)
+        {
+            return enif_make_tuple3(env, eleveldb::ATOM_ERROR, caller_ref,
+                                    enif_make_tuple2(env, eleveldb::ATOM_BAD_WRITE_ACTION,
+                                                     result));
+        }   // if
+
+        leveldb::Status status = db_ptr->m_Db->Write(opts, &batch);
+
         return (status.ok() ? ATOM_OK : error_tuple(env, ATOM_ERROR_DB_WRITE, status));
     }   // if
     else
     {
+        // use heap if sending message :-(
+        leveldb::WriteOptions* opts = new leveldb::WriteOptions;
+        fold(env, argv[3], parse_write_option, *opts);
+
+        // Construct a write batch:
+        leveldb::WriteBatch* batch = new leveldb::WriteBatch;
+
+        // Seed the batch's data:
+        ERL_NIF_TERM result = fold(env, argv[2], write_batch_item, *batch);
+        if(eleveldb::ATOM_OK != result)
+        {
+            delete batch;
+            return enif_make_tuple3(env, eleveldb::ATOM_ERROR, caller_ref,
+                                    enif_make_tuple2(env, eleveldb::ATOM_BAD_WRITE_ACTION,
+                                                     result));
+        }   // if
+
         eleveldb::WorkTask* work_item = new eleveldb::WriteTask(env, caller_ref,
                                                                 db_ptr.get(), batch, opts);
         eleveldb_priv_data& data = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
