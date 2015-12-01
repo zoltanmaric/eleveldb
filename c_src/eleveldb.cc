@@ -630,7 +630,7 @@ ERL_NIF_TERM send_reply(ErlNifEnv *env, ERL_NIF_TERM ref, ERL_NIF_TERM reply)
     return ATOM_OK;
 }
 
-// Boilerplate for submitting to the thread queue.  
+// Boilerplate for submitting to the thread queue.
 // Takes ownership of the item. assumes allocated through new
 
 ERL_NIF_TERM
@@ -710,6 +710,7 @@ async_write(
     const ERL_NIF_TERM& handle_ref = argv[1];
     const ERL_NIF_TERM& action_ref = argv[2];
     const ERL_NIF_TERM& opts_ref   = argv[3];
+    ERL_NIF_TERM ret_term;
 
     ReferencePtr<DbObject> db_ptr;
 
@@ -724,7 +725,7 @@ async_write(
 
     // is this even possible?
     if(NULL == db_ptr->m_Db)
-        return send_reply(env, caller_ref, error_einval(env));
+        return error_einval(env);
 
     // Construct a write batch:
     leveldb::WriteBatch* batch = new leveldb::WriteBatch;
@@ -733,19 +734,39 @@ async_write(
     ERL_NIF_TERM result = fold(env, argv[2], write_batch_item, *batch);
     if(eleveldb::ATOM_OK != result)
     {
-        return send_reply(env, caller_ref,
-                          enif_make_tuple3(env, eleveldb::ATOM_ERROR, caller_ref,
-                                           enif_make_tuple2(env, eleveldb::ATOM_BAD_WRITE_ACTION,
-                                                            result)));
+        return enif_make_tuple3(env, eleveldb::ATOM_ERROR, caller_ref,
+                                enif_make_tuple2(env, eleveldb::ATOM_BAD_WRITE_ACTION,
+                                                 result));
     }   // if
 
     leveldb::WriteOptions* opts = new leveldb::WriteOptions;
     fold(env, argv[3], parse_write_option, *opts);
 
-    eleveldb::WorkTask* work_item = new eleveldb::WriteTask(env, caller_ref,
-                                                            db_ptr.get(), batch, opts);
-    return submit_to_thread_queue(work_item, env, caller_ref);
-}
+    opts->non_blocking=db_ptr->m_Db->RequestNonBlockTicket();
+    if (opts->non_blocking)
+    {
+        leveldb::Status status = db_ptr->m_Db->Write(*opts, batch);
+        return (status.ok() ? ATOM_OK : error_tuple(env, ATOM_ERROR_DB_WRITE, status));
+    }   // if
+    else
+    {
+        eleveldb::WorkTask* work_item = new eleveldb::WriteTask(env, caller_ref,
+                                                                db_ptr.get(), batch, opts);
+        eleveldb_priv_data& data = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
+        if(false == data.thread_pool.submit(work_item))
+        {
+            delete work_item;
+            return enif_make_tuple2(env, eleveldb::ATOM_ERROR, caller_ref);
+        }   // if
+
+        return(caller_ref);
+    }   // else
+
+    // not going to reach this
+    return eleveldb::ATOM_OK;
+
+}   // async_write
+
 
 ERL_NIF_TERM
 async_get(

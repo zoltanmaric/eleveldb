@@ -217,8 +217,11 @@ delete(Ref, Key, Opts) -> write(Ref, [{delete, Key}], Opts).
 -spec write(db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
 write(Ref, Updates, Opts) ->
     CallerRef = make_ref(),
-    async_write(CallerRef, Ref, Updates, Opts),
-    ?WAIT_FOR_REPLY(CallerRef).
+    case async_write(CallerRef, Ref, Updates, Opts) of
+        CallerRef ->
+            ?WAIT_FOR_REPLY(CallerRef);
+        Anything -> Anything
+    end.
 
 -spec async_put(db_ref(), reference(), binary(), binary(), write_options()) -> ok.
 async_put(Ref, Context, Key, Value, Opts) ->
