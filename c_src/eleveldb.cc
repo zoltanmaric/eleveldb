@@ -157,6 +157,7 @@ ERL_NIF_TERM ATOM_UNDEFINED;
 ERL_NIF_TERM ATOM_ENCODING;
 ERL_NIF_TERM ATOM_ERLANG_ENCODING;
 ERL_NIF_TERM ATOM_MSGPACK_ENCODING;
+ERL_NIF_TERM ATOM_BIGSETS;
 }   // namespace eleveldb
 
 using std::nothrow;
@@ -486,6 +487,13 @@ ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Optio
             ret_val=enif_get_string(env, option[1], buffer, 256, ERL_NIF_LATIN1);
             if (0<ret_val && ret_val<256)
                 opts.tiered_slow_prefix = buffer;
+        }
+        else if (option[0] == eleveldb::ATOM_BIGSETS)
+        {
+          if (option[1] == eleveldb::ATOM_TRUE)
+            {
+              opts.comparator = leveldb::GetBSComparator();
+            }
         }
     }
 
@@ -1491,6 +1499,7 @@ try
     ATOM(eleveldb::ATOM_ENCODING, "encoding");
     ATOM(eleveldb::ATOM_ERLANG_ENCODING,  Encoding::encodingAtom(Encoding::ERLANG).c_str());
     ATOM(eleveldb::ATOM_MSGPACK_ENCODING, Encoding::encodingAtom(Encoding::MSGPACK).c_str());
+    ATOM(eleveldb::ATOM_BIGSETS, "bigsets");
 #undef ATOM
 
 
