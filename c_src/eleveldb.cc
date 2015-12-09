@@ -44,6 +44,7 @@
 #include "leveldb/cache.h"
 #include "leveldb/filter_policy.h"
 #include "leveldb/perf_count.h"
+#include "leveldb/comparator.h"
 
 #ifndef INCL_THREADING_H
     #include "threading.h"
