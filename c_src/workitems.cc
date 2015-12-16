@@ -1033,6 +1033,9 @@ work_result RangeScanTask::operator()()
                    << ErlUtil::formatBinary((unsigned char*)key.data(), key.size());
                 
                 sendMsg(msg_env, ATOM_STREAMING_ERROR, pid, os.str());
+
+                delete iter;
+
                 return work_result(local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR);
             }
             
@@ -1112,6 +1115,8 @@ work_result RangeScanTask::operator()()
     //------------------------------------------------------------
 
     sendMsg(msg_env, ATOM_STREAMING_END, pid);
+
+    delete iter;
 
     if(out_offset)
         enif_release_binary(&bin);
