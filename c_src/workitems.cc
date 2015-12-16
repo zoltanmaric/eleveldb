@@ -618,7 +618,8 @@ RangeScanOptions::RangeScanOptions() :
     verify_checksums(true), 
     encodingType_(Encoding::NONE),
     env_(0), 
-    useRangeFilter_(false) {};
+    useRangeFilter_(false),
+    isBigset_(false) {};
 
 RangeScanOptions::~RangeScanOptions() {};
     
@@ -773,7 +774,8 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
     has_end_key_(bool(end_key)),
     sync_obj_(sync_obj),
     range_filter_(0),
-    extractor_(0)
+    extractor_(0),
+    bs_acc_(0)
 {
     //------------------------------------------------------------
     // Sanity checks
@@ -814,6 +816,10 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
         range_filter_ = parse_range_filter_opts(options_.env_, 
                                                 options_.rangeFilterSpec_, 
                                                 *(extractor_), throwIfBadFilter);
+    }
+
+    if(options_.isBigset_) {
+      bs_acc_ = new BigsetAccumulator();
     }
     
     if(!sync_obj_) {
@@ -1038,6 +1044,28 @@ work_result RangeScanTask::operator()()
             
         }
 
+
+        if(options_.isBigset) {
+          // This is a bigset, so accumulate per-element before
+          // adding/dropping from accumulator
+          bs_acc_->add(key, value);
+
+          if(bs_acc_->ready()) {
+            filter_passed = true;
+
+            // I guess this is not ok as key and value are constants
+            // above, but you get the idea, what we're saying is "if
+            // the element accumulator is ready to emit an element,ctx
+            // pair, set them here to be added to the buffer below
+            // maybe do it with setData/getData, I dunno, I'm just
+            // guessing here.
+           
+            key = bs_acc_->getReadyKey();
+            value = bs_acc_->getReadyValue();
+            bs_acc_->taken();
+          }
+        }
+        
         if (filter_passed) {
 	  
             const size_t ksz = key.size();
@@ -1105,6 +1133,14 @@ work_result RangeScanTask::operator()()
 
         iter->Next();
     }
+
+    // Will have to call here to check if any last key is ready
+     if(bs_acc_->emitValue()) {
+           finalKey = bs_acc_->getKey();
+           finalValue = bs_acc_->getValue();
+     }
+
+     // and somehow add them to the message to be sent?
 
     //------------------------------------------------------------
     // If exiting the work loop, send a streaming_end message to any
