@@ -32,6 +32,7 @@
 #include "filter.h"
 
 #include "Encoding.h"
+#include "BigsetAccumulator.h"
 
 #ifndef INCL_MUTEX_H
     #include "mutex.h"
@@ -371,14 +372,18 @@ struct RangeScanOptions {
     
     bool fill_cache;
     bool verify_checksums;
+
+    // Record type options
+
+    bool isBigset_;
     
     // Filter options
-    
+
     Encoding::Type encodingType_;
     ERL_NIF_TERM rangeFilterSpec_;
     ErlNifEnv* env_;
     bool useRangeFilter_;
-    
+
     RangeScanOptions();
     ~RangeScanOptions();
     
@@ -481,6 +486,7 @@ protected:
     SyncObject* sync_obj_;
     ExpressionNode<bool>* range_filter_;
     Extractor* extractor_;
+    std::auto_ptr<Bigset::BigsetAccumulator> bigset_acc_;
 
 private:
     

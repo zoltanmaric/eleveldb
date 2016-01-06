@@ -615,9 +615,10 @@ RangeScanOptions::RangeScanOptions() :
     start_inclusive(true), 
     end_inclusive(false), 
     fill_cache(false), 
-    verify_checksums(true), 
+    verify_checksums(true),
+    isBigset_(false),
     encodingType_(Encoding::NONE),
-    env_(0), 
+    env_(0),
     useRangeFilter_(false) {};
 
 RangeScanOptions::~RangeScanOptions() {};
@@ -815,6 +816,10 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
                                                 options_.rangeFilterSpec_, 
                                                 *(extractor_), throwIfBadFilter);
     }
+
+    if(options_.isBigset_) {
+      bigset_acc_.reset( new Bigset::BigsetAccumulator() );
+    }
     
     if(!sync_obj_) {
         ThrowRuntimeError("Constructor was called with NULL SyncObject pointer");
@@ -953,13 +958,11 @@ work_result RangeScanTask::operator()()
                  cmp->Compare(iter->key(), ekey_slice) >= 0
                 ))) {
 
-	  // If data are present in the batch (ie, out_offset != 0),
-	  // send the batch now
+            // If data are present in the batch (ie, out_offset != 0),
+            // send the batch now
 
-	    if (out_offset) {
-            
-	      // Shrink it to final size.
-
+	        if (out_offset) {
+                // Shrink it to final size.
                 if (out_offset != bin.size)
                     enif_realloc_binary(&bin, out_offset);
 
@@ -970,21 +973,21 @@ work_result RangeScanTask::operator()()
             break;
         }
 
-	//------------------------------------------------------------
-	// Else keep going; shove the next entry in the batch, but
-	// only if it passes any user-specified filter.  We default to
-	// filter_passed = true, in case we are not using a filter,
-	// which will cause all keys to be returned
-	//------------------------------------------------------------
+        //------------------------------------------------------------
+        // Else keep going; shove the next entry in the batch, but
+        // only if it passes any user-specified filter.  We default to
+        // filter_passed = true, in case we are not using a filter,
+        // which will cause all keys to be returned
+        //------------------------------------------------------------
 
         leveldb::Slice key   = iter->key();
         leveldb::Slice value = iter->value();
 
         bool filter_passed = true;
 
-	//------------------------------------------------------------
-	// If we are using a filter, evaluate it here
-	//------------------------------------------------------------
+        //------------------------------------------------------------
+        // If we are using a filter, evaluate it here
+        //------------------------------------------------------------
 
         if(options_.useRangeFilter_) {
 
@@ -1038,10 +1041,25 @@ work_result RangeScanTask::operator()()
             
         }
 
+        if ( options_.isBigset_ )
+        {
+            // we are processing a bigset, so accumulate per-element (we
+            // may have multiple records per element in the set)
+            bigset_acc_->add( key, value );
+
+            filter_passed = bigset_acc_->recordReady();
+            if ( filter_passed )
+            {
+                // we have finished accumulating the current element,
+                // so add it to the output buffer
+                bigset_acc_->getCurrentElement( key, value );
+            }
+        }
+        
         if (filter_passed) {
 	  
             const size_t ksz = key.size();
-	    const size_t vsz = value.size();
+            const size_t vsz = value.size();
 
             const size_t ksz_sz = VarintLength(ksz);
             const size_t vsz_sz = VarintLength(vsz);
@@ -1050,17 +1068,17 @@ work_result RangeScanTask::operator()()
             const size_t next_offset = out_offset + esz;
 
             // Allocate the output data array if this is the first data
-	    // (i.e., if out_offset == 0)
+            // (i.e., if out_offset == 0)
 
-            if(out_offset == 0)
+            if (out_offset == 0)
                 enif_alloc_binary(initial_bin_size, &bin);
 
-	    //------------------------------------------------------------
+            //------------------------------------------------------------
             // If we need more space, allocate it exactly since that means we
             // reached the batch max anyway and will send it right away
-	    //------------------------------------------------------------
+            //------------------------------------------------------------
 
-            if(next_offset > bin.size)
+            if (next_offset > bin.size)
                 enif_realloc_binary(&bin, next_offset);
 
             char * const out = (char*)bin.data + out_offset;
@@ -1072,11 +1090,11 @@ work_result RangeScanTask::operator()()
             memcpy(out + ksz_sz + ksz + vsz_sz, value.data(), vsz);
 
             out_offset = next_offset;
-	    
-	    //------------------------------------------------------------
-	    // If we've reached the maximum number of bytes to include in
-	    // the batch, possibly shrink the binary and send it
-	    //------------------------------------------------------------
+
+            //------------------------------------------------------------
+            // If we've reached the maximum number of bytes to include in
+            // the batch, possibly shrink the binary and send it
+            // ------------------------------------------------------------
 
             if(out_offset >= options_.max_batch_bytes) {
 
@@ -1090,20 +1108,26 @@ work_result RangeScanTask::operator()()
                 sync_obj_->AddBytes(out_offset);
 
                 out_offset = 0;
+	        }
+
+    	    //------------------------------------------------------------
+	        // Increment the number of keys read and step to the next
+	        // key
+	        //------------------------------------------------------------
+
+	        ++num_read;
+
+    	} else {
+            //	  COUT("Filter DIDN'T pass");
 	    }
 
-	    //------------------------------------------------------------
-	    // Increment the number of keys read and step to the next
-	    // key
-	    //------------------------------------------------------------
-
-	    ++num_read;
-
-	} else {
-            //	  COUT("Filter DIDN'T pass");
-	}
-
         iter->Next();
+    }
+
+    // do we have a partially accumulated bigset record?
+    if ( options_.isBigset_ )
+    {
+
     }
 
     //------------------------------------------------------------
