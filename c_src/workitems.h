@@ -486,7 +486,7 @@ protected:
     SyncObject* sync_obj_;
     ExpressionNode<bool>* range_filter_;
     Extractor* extractor_;
-    std::auto_ptr<Bigset::BigsetAccumulator> bigset_acc_;
+    std::auto_ptr<basho::Bigset::BigsetAccumulator> bigset_acc_;
 
 private:
     

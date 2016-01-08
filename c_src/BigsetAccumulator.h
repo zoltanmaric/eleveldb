@@ -10,6 +10,8 @@
 #include "CrdtUtils.h"
 #include "leveldb/slice.h"
 
+// TODO: remove all this endian stuff and reuse the DecodeFixed32() and DecodeFixed64() functions from leveldb
+//
 // platform stuff taken from leveldb/port/port_posix.h
 //
 // NOTE: we need more build infrastructure for this to work; e.g., we need
@@ -49,67 +51,35 @@ namespace port {
 static const bool kLittleEndian = true; //PLATFORM_IS_LITTLE_ENDIAN;
 }
 
+namespace basho {
 namespace Bigset {
 
 typedef leveldb::Slice ErlTerm;
 typedef uint32_t       ErlCounter;
 
-class Dot
-{
-private:
-    ErlTerm    m_actor;
-    ErlCounter m_counter;
+typedef basho::CrdtUtils::Dot<ErlTerm, ErlCounter>  Dot;
+typedef basho::CrdtUtils::Dots<ErlTerm, ErlCounter> Dots;
 
-public:
-    Dot( ErlTerm actor, ErlCounter counter )
-            : m_actor( actor ), m_counter( counter ) { }
-};
-
-class Dots
-{
-private:
-    std::list<Dot> m_Dots;
-
-public:
-    Dots() { }
-
-    ~Dots() { }
-
-    void
-    add( ErlTerm actor, ErlCounter counter, bool isTombstone )
-    {
-        if ( !isTombstone )
-        {
-            m_Dots.push_back( Dot( actor, counter ) );
-        }
-    }
-
-    void clear() { m_Dots.clear(); }
-
-    bool empty() const { return m_Dots.empty(); }
-
-    ErlTerm toValue() const { return ErlTerm(); }
-};
-
-class BigsetClock : public CrdtUtils::DotContext<ErlTerm>
+class BigsetClock : public basho::CrdtUtils::DotContext<ErlTerm, ErlCounter>
 {
 public:
     BigsetClock() { }
 
     virtual ~BigsetClock() { }
 
+
     void
-    merge( const BigsetClock& /*clock*/ )
+    Merge( const BigsetClock& /*clock*/ )
     {
     }
 
     Dots
-    subtractSeen( const Dots& /*dots*/ )
+    SubtractSeen( const Dots& /*dots*/ )
     {
         return Dots();
     }
 
-    static BigsetClock valueToClock( const ErlTerm& value )
+    static BigsetClock ValueToBigsetClock( const ErlTerm& value )
     {
         return BigsetClock();
     }
@@ -158,6 +128,8 @@ class BigsetKey
     bool     m_IsTombstone;
 
     // DecodeFixedXx() methods taken from leveldb/util/coding.h
+    //
+    // TODO: reuse the DecodeFixed32() function from leveldb
     static uint32_t DecodeFixed32( const char* ptr )
     {
         if ( port::kLittleEndian )
@@ -184,6 +156,7 @@ class BigsetKey
         }
     }
 
+    // TODO: reuse the DecodeFixed64() function from leveldb
     static uint64_t DecodeFixed64( const char* ptr )
     {
         if ( port::kLittleEndian )
@@ -228,7 +201,8 @@ class BigsetKey
 
     static leveldb::Slice GetKeyType( leveldb::Slice& s )
     {
-        leveldb::Slice res = leveldb::Slice( s.data(), 1 ); // one byte c, e, or z
+        leveldb::Slice
+                res = leveldb::Slice( s.data(), 1 ); // one byte c, e, or z
         s.remove_prefix( 1 );
         return res;
     }
@@ -236,7 +210,7 @@ class BigsetKey
 public:
     BigsetKey( ErlTerm key )
     {
-        m_SetName = Get32PrefData( key );
+        m_SetName              = Get32PrefData( key );
         leveldb::Slice keyType = GetKeyType( key );
         switch ( keyType[0] )
         {
@@ -257,42 +231,68 @@ public:
                 break;
         }
 
-        if ( isClock() )
+        if ( IsClock() )
         {
             // actor is the remaining portion of the key (not length-prefixed)
             m_Actor = key;
         }
-        else if ( isElement() )
+        else if ( IsElement() )
         {
-            m_Element = Get32PrefData( key );
-            m_Actor   = Get32PrefData( key );
-            m_Counter = GetCounter( key );
+            m_Element     = Get32PrefData( key );
+            m_Actor       = Get32PrefData( key );
+            m_Counter     = GetCounter( key );
             m_IsTombstone = ('r' == GetTsb( key )[0]);
         }
     }
 
-    bool isClock()   const { return KeyTypeClock   == m_KeyType; }
-    bool isElement() const { return KeyTypeElement == m_KeyType; }
-    bool isEnd()     const { return KeyTypeEnd     == m_KeyType; }
-    bool isValid()   const { return KeyTypeInvalid != m_KeyType; }
+    bool IsClock() const { return KeyTypeClock == m_KeyType; }
 
-    const ErlTerm& getActor()     const { return m_Actor; }
-    const ErlTerm& getElement()   const { return m_Element; }
-    ErlCounter     getCounter()   const { return m_Counter; }
-    bool           getTombstone() const { return m_IsTombstone; }
+    bool IsElement() const { return KeyTypeElement == m_KeyType; }
+
+    bool IsEnd() const { return KeyTypeEnd == m_KeyType; }
+
+    bool IsValid() const { return KeyTypeInvalid != m_KeyType; }
+
+    const ErlTerm& GetSetName() const { return m_SetName; }
+
+    const ErlTerm& GetActor() const { return m_Actor; }
+
+    const ErlTerm& GetElement() const { return m_Element; }
+
+    ErlCounter GetCounter() const { return m_Counter; }
+
+    bool GetTombstone() const { return m_IsTombstone; }
 };
 
 class BigsetAccumulator
 {
 private:
-    bool        m_RecordReady;
     ErlTerm     m_ThisActor;
+    ErlTerm     m_CurrentSetName;
     ErlTerm     m_CurrentElement;
     BigsetClock m_CurrentContext;
     Dots        m_CurrentDots;
 
-    ErlTerm     m_ReadyKey;
-    ErlTerm     m_ReadyValue;
+    ErlTerm m_ReadyKey;
+    ErlTerm m_ReadyValue;
+    bool    m_RecordReady;
+
+    // sets the "ready" values after we have finished processing the last record for an element
+    void
+    FinalizeElement()
+    {
+        Dots remainingDots = m_CurrentContext.SubtractSeen( m_CurrentDots );
+        if ( !remainingDots.IsEmpty() )
+        {
+            // this element is "in" the set locally
+            m_ReadyKey    = m_CurrentElement;
+            m_ReadyValue  = remainingDots.ToValue();
+            m_RecordReady = true;
+
+            m_CurrentContext.Clear();
+            m_CurrentDots.Clear();
+        }
+    }
 
 public:
     BigsetAccumulator() : m_RecordReady( false ) { }
@@ -300,57 +300,70 @@ public:
     ~BigsetAccumulator() { }
 
     void
-    add( ErlTerm key, ErlTerm value )
+    AddRecord( ErlTerm key, ErlTerm value )
     {
         BigsetKey keyToAdd( key );
-        if ( keyToAdd.isValid() )
+        if ( keyToAdd.IsValid() )
         {
-            if ( keyToAdd.isClock() )
+            if ( m_CurrentSetName.empty() )
+            {
+                // this is the first record for this bigset, so save the set's name
+                m_CurrentSetName = keyToAdd.GetSetName();
+            }
+            else if ( m_CurrentSetName != keyToAdd.GetSetName() )
+            {
+                // this is unexpected; we didn't hit an "end" key for the bigset
+                // TODO: handle unexpected set name change
+            }
+
+            if ( keyToAdd.IsClock() )
             {
                 // we have a clock key; see if it's for the actor we're tracking; if not, we ignore this clock
                 if ( 0 == m_ThisActor.size() )
                 {
                     // this is the first clock key we've seen for this bigset, so save its associated actor
-                    m_ThisActor = keyToAdd.getActor();
+                    m_ThisActor = keyToAdd.GetActor();
                 }
-                else if ( keyToAdd.getActor() == m_ThisActor )
-                {}
+                else if ( keyToAdd.GetActor() == m_ThisActor )
+                {
+                    // get the clock value for this actor
+                }
+                else
+                {
+                    // ignore this actor; not the one we care about
+                }
             }
-            else if ( keyToAdd.isElement() )
+            else if ( keyToAdd.IsElement() )
             {
                 // we have an element key; see if it's for the current element we're processing
-                if ( keyToAdd.getElement() != m_CurrentElement )
+                if ( keyToAdd.GetElement() != m_CurrentElement )
                 {
                     // we are starting a new element, so finish processing of the previous element
-                    Dots remainingDots = m_CurrentContext.subtractSeen( m_CurrentDots );
-                    if ( !remainingDots.empty() )
-                    {
-                        // this element is "in" the set locally
-                        m_ReadyKey = m_CurrentElement;
-                        m_ReadyValue = remainingDots.toValue();
-                        m_RecordReady = true;
-                        m_CurrentContext.clear();
-                        m_CurrentDots.clear();
-                    }
+                    FinalizeElement();
                 }
 
                 // accumulate values
-                m_CurrentElement = keyToAdd.getElement();
-                m_CurrentContext.merge( BigsetClock::valueToClock( value ) );
-                m_CurrentDots.add( keyToAdd.getActor(), keyToAdd.getCounter(), keyToAdd.getTombstone() );
+                m_CurrentElement = keyToAdd.GetElement();
+                m_CurrentContext.Merge( BigsetClock::ValueToBigsetClock( value ) );
+                m_CurrentDots.AddDot( keyToAdd.GetActor(),
+                                      keyToAdd.GetCounter(),
+                                      keyToAdd.GetTombstone() );
             }
-            else if ( keyToAdd.isEnd() )
+            else if ( keyToAdd.IsEnd() )
             {
-                // this is an end key, so we're done enumerating the elements in this bigset
+                // this is an end key, so we're done enumerating the elements in this
+                // bigset, and we need to finish processing the previous element
+                FinalizeElement();
             }
             else
             {
                 // oops, we weren't expecting this
+                // TODO: handle unexpected element type
             }
         }
         else
         {
-            // throw exception? if so, caller better catch it
+            // TODO: handle invalid element
         }
     }
 
@@ -365,13 +378,14 @@ public:
     {
         if ( m_RecordReady )
         {
-            key = m_ReadyKey;
-            value = m_ReadyValue;
+            key           = m_ReadyKey;
+            value         = m_ReadyValue;
             m_RecordReady = false; // prepare for the next record
         }
     }
 };
 
 } // namespace Bigset
+} // namespace basho
 
 #endif //BIGSETS_BIGSET_ACC_H
