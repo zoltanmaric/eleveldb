@@ -125,7 +125,8 @@ init() ->
                          {tiered_slow_level, pos_integer()} |
                          {tiered_fast_prefix, string()} |
                          {tiered_slow_prefix, string()} |
-                         {bigsets, boolean()}].
+                         {bigsets, boolean()} |
+                         {vnode, binary()}].
 
 -type read_option() :: {verify_checksums, boolean()} |
                        {fill_cache, boolean()}.

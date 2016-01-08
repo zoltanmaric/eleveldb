@@ -159,6 +159,7 @@ ERL_NIF_TERM ATOM_ENCODING;
 ERL_NIF_TERM ATOM_ERLANG_ENCODING;
 ERL_NIF_TERM ATOM_MSGPACK_ENCODING;
 ERL_NIF_TERM ATOM_BIGSETS;
+ERL_NIF_TERM ATOM_VNODE;
 }   // namespace eleveldb
 
 using std::nothrow;
@@ -1501,6 +1502,7 @@ try
     ATOM(eleveldb::ATOM_ERLANG_ENCODING,  Encoding::encodingAtom(Encoding::ERLANG).c_str());
     ATOM(eleveldb::ATOM_MSGPACK_ENCODING, Encoding::encodingAtom(Encoding::MSGPACK).c_str());
     ATOM(eleveldb::ATOM_BIGSETS, "bigsets");
+    ATOM(eleveldb::ATOM_VNODE, "vnode");
 #undef ATOM
 
 
