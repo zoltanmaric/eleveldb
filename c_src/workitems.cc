@@ -818,7 +818,7 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
     }
 
     if(options_.isBigset_) {
-      bigset_acc_.reset( new Bigset::BigsetAccumulator() );
+      bigset_acc_.reset( new basho::Bigset::BigsetAccumulator() );
     }
     
     if(!sync_obj_) {
@@ -1045,7 +1045,7 @@ work_result RangeScanTask::operator()()
         {
             // we are processing a bigset, so accumulate per-element (we
             // may have multiple records per element in the set)
-            bigset_acc_->add( key, value );
+            bigset_acc_->AddRecord( key, value );
 
             filter_passed = bigset_acc_->recordReady();
             if ( filter_passed )

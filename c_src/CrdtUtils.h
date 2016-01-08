@@ -39,7 +39,53 @@
 
 //using namespace std;
 
+namespace basho {
 namespace CrdtUtils {
+
+// template class for a Dot, which is a pair consisting of an actor of
+// type T (e.g., Slice) together with a counter of type C (e.g., uint32_t)
+template<typename T, typename C>
+class Dot : public std::pair<T, C>
+{
+public:
+    Dot( T Actor, C Counter ) { this->first = Actor, this->second = Counter; }
+
+    // accessors
+    void SetActor( T Actor ) { this->first = Actor; }
+    T GetActor() const { return this->first; }
+
+    void SetCounter( C Counter ) { this->second = Counter; }
+    C GetCounter() const { return this->second; }
+};
+
+// container class for Dot<> objects
+template<typename T, typename C>
+class Dots
+{
+private:
+    std::list<Dot<T, C> > m_Dots;
+
+public:
+    Dots() { }
+
+    ~Dots() { }
+
+    void
+    AddDot( T Actor, C Counter, bool IsTombstone )
+    {
+        if ( !IsTombstone )
+        {
+            m_Dots.push_back( Dot<T, C>( Actor, Counter ) );
+        }
+    }
+
+    void Clear() { m_Dots.clear(); }
+
+    bool IsEmpty() const { return m_Dots.empty(); }
+
+    T ToValue() const { return T(); }
+};
+
 
 #if 0
 template< bool b >
@@ -159,17 +205,17 @@ ostream &operator<<( ostream &output, const vector<T>& o)
 #endif // 0
 
 // Autonomous causal context, for context sharing in maps
-template<typename K>
+template<typename T, typename C>
 class DotContext
 {
-    std::map<K, int>             m_CausalContext; // Compact causal context
-    std::set<std::pair<K, int> > m_DotCloud;      // Dot cloud
+    std::map<T, C>       m_CausalContext; // Compact causal context
+    std::set<Dot<T, C> > m_DotCloud;      // Dot cloud
 
 public:
     DotContext() { }
 
-    DotContext( const std::map<K, int>& CausalContext,
-                const std::set<std::pair<K, int> >& DotCloud )
+    DotContext( const std::map<T, C>& CausalContext,
+                const std::set<Dot<T, C> >& DotCloud )
     {
         m_CausalContext = CausalContext;
         m_DotCloud      = DotCloud;
@@ -177,13 +223,13 @@ public:
 
     virtual ~DotContext() { }
 
-    DotContext( const DotContext<K>& that )
+    DotContext( const DotContext<T, C>& that )
     {
         m_CausalContext = that.m_CausalContext;
         m_DotCloud      = that.m_DotCloud;
     }
 
-    DotContext<K>& operator=( const DotContext<K>& that )
+    DotContext<T, C>& operator=( const DotContext<T, C>& that )
     {
         if ( &that != this )
         {
@@ -209,9 +255,9 @@ public:
     }
 #endif // 0
 
-    void clear() { m_CausalContext.clear(), m_DotCloud.clear(); }
+    void Clear() { m_CausalContext.clear(), m_DotCloud.clear(); }
 
-    bool dotin( const std::pair<K, int>& dot ) const
+    bool IsDotIncluded( const Dot<T, C>& dot ) const
     {
         const auto itm = m_CausalContext.find( dot.first );
         if ( itm != m_CausalContext.end() && dot.second <= itm->second )
@@ -221,7 +267,7 @@ public:
         return (m_DotCloud.count( dot ) != 0);
     }
 
-    void compact()
+    void Compact()
     {
         // Compact DC to CC if possible
         //typename map<K,int>::iterator mit;
@@ -258,7 +304,7 @@ public:
                           m_CausalContext.at( sit->first ) ) // dominated, so prune
                 {
                     m_DotCloud.erase( sit++ );
-                    // no extra compaction oportunities so flag untouched
+                    // no extra compaction opportunities so flag untouched
                 }
                 else
                 {
@@ -266,35 +312,35 @@ public:
                 }
             }
         }
-        while ( flag == true );
+        while ( flag );
     }
 
-    std::pair<K, int> makedot( const K& id )
+    Dot<T, C> MakeDot( const T& id )
     {
         // On a valid dot generator, all dots should be compact on the used id
         // Making the new dot, updates the dot generator and returns the dot
         // pair<typename map<K,int>::iterator,bool> ret;
-        auto kib = m_CausalContext.insert( std::pair<K, int>( id, 1 ) );
-        if ( kib.second == false )
+        auto kib = m_CausalContext.insert( Dot<T, C>( id, 1 ) );
+        if ( !kib.second )
         { // already there, so update it
             (kib.first->second) += 1;
         }
         //return dot;
-        return std::pair<K, int>( *kib.first );
+        return Dot<T, C>( *kib.first );
     }
 
-    void insertdot( const std::pair<K, int>& d, bool compactnow = true )
+    void InsertDot( const Dot<T, C>& d, bool compactnow = true )
     {
         // Set
         m_DotCloud.insert( d );
         if ( compactnow )
         {
-            compact();
+            Compact();
         }
     }
 
 
-    void join( const DotContext<K>& o )
+    void Join( const DotContext<T, C>& o )
     {
         if ( this == &o )
         {
@@ -343,11 +389,10 @@ public:
         // Set
         for ( const auto& e : o.m_DotCloud )
         {
-            insertdot( e, false );
+            InsertDot( e, false );
         }
 
-        compact();
-
+        Compact();
     }
 };
 
@@ -2110,3 +2155,4 @@ public:
 #endif // 0
 
 } // namespace CrdtUtils
+} // namespace basho
