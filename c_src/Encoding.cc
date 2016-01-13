@@ -20,6 +20,12 @@ ostream&
 eleveldb::operator<<(ostream& os, Encoding::Type type)
 {
   switch (type) {
+  case Encoding::EI:
+      os << "EI";
+      break;
+  case Encoding::PB:
+      os << "PB";
+      break;
   case Encoding::ERLANG:
       os << "ERLANG";
       break;
@@ -37,6 +43,12 @@ eleveldb::operator<<(ostream& os, Encoding::Type type)
 std::string Encoding::encodingAtom(Encoding::Type type)
 {
     switch(type) {
+    case Encoding::PB:
+        return "pb";
+        break;
+    case Encoding::EI:
+        return "ei";
+        break;
     case Encoding::ERLANG:
         return "erlang";
         break;
@@ -51,6 +63,12 @@ std::string Encoding::encodingAtom(Encoding::Type type)
 
 Encoding::Type Encoding::typeOf(std::string str, bool doThrow)
 {
+    if(str == encodingAtom(PB))
+        return PB;
+
+    if(str == encodingAtom(EI))
+        return EI;
+
     if(str == encodingAtom(ERLANG))
         return ERLANG;
 

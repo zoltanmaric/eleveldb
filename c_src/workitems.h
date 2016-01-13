@@ -489,9 +489,7 @@ namespace eleveldb {
         Encoding::Type encodingType_;
         ERL_NIF_TERM rangeFilterSpec_;
         ErlNifEnv* env_;
-        ExpressionNode<bool>* range_filter_;
         bool useRangeFilter_;
-        Extractor* extractor_;
 
         RangeScanOptions() : 
             max_unacked_bytes(10 * 1024 * 1024), 
@@ -504,16 +502,11 @@ namespace eleveldb {
             verify_checksums(true), 
             encodingType_(Encoding::NONE),
             env_(0), 
-            range_filter_(0), 
-            useRangeFilter_(false), 
-            extractor_(0)
-            { }
+            useRangeFilter_(false)
+            { 
+            }
 
         ~RangeScanOptions() {
-            if(range_filter_) {
-                delete range_filter_;
-                range_filter_ = 0;
-            }
         };
 
         //------------------------------------------------------------
@@ -532,13 +525,14 @@ namespace eleveldb {
             if(useRangeFilter_) {
                 switch (encodingType_) {
                 case Encoding::MSGPACK:
-                    extractor_ = new ExtractorMsgpack();
+                case Encoding::EI:
+                case Encoding::PB:
                     break;
                 case Encoding::NONE:
                     ThrowRuntimeError("No object encoding was specified");
                     break;
                 case Encoding::UNKNOWN:
-                    ThrowRuntimeError("An invalud object encoding was specified");
+                    ThrowRuntimeError("An invalid object encoding was specified");
                     break;
                 default:
                     ThrowRuntimeError("An unsupported object encoding was specified: " << encodingType_);
@@ -629,6 +623,8 @@ namespace eleveldb {
         std::string end_key_;
         bool has_end_key_;
         SyncObject * sync_obj_;
+        ExpressionNode<bool>* range_filter_;
+        Extractor* extractor_;
 
     };  // class RangeScanTask
 

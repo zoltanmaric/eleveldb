@@ -39,8 +39,8 @@ public:
     virtual bool    has_value() const {return false;};
 
     virtual void    set_value(std::string key,     void* val, 
-                              DataType::Type type, size_t size=0) = 0;
-  
+                              DataType::Type type, size_t size=0, bool ext=true) = 0;
+
     //------------------------------------------------------------
     // Check a type against the operand data type for this expression
     //------------------------------------------------------------
@@ -120,9 +120,9 @@ public:
     }
     
     virtual void set_value(std::string key, void* value, 
-                           DataType::Type type, size_t size=0) {
-        left_->set_value(key, value, type, size);
-        right_->set_value(key, value, type, size);
+                           DataType::Type type, size_t size=0, bool ext=true) {
+        left_->set_value(key, value, type, size, ext);
+        right_->set_value(key, value, type, size, ext);
     }
 
     virtual bool has_value() const {
@@ -153,8 +153,11 @@ public:
     virtual ~AndOperator() {};
 
     virtual bool evaluate() const {
-        BinaryExpression<bool, bool>::throwIfNoValue();
-        return left_->evaluate() && right_->evaluate();
+        if(has_value()) {
+            return left_->evaluate() && right_->evaluate();
+        } else {
+            return false;
+        }
     }
 
 };
@@ -172,8 +175,11 @@ public:
     virtual ~OrOperator() {};
 
     virtual bool evaluate() const {
-        BinaryExpression<bool, bool>::throwIfNoValue();
-        return left_->evaluate() || right_->evaluate();
+        if(has_value()) {
+            return left_->evaluate() || right_->evaluate();
+        } else {
+            return false;
+        }
     }
 };
 
@@ -193,8 +199,11 @@ public:
     virtual ~GtOperator() {};
 
     virtual bool evaluate() const {
-        BinaryExpression<bool,T>::throwIfNoValue();
-        return this->left_->evaluate() > this->right_->evaluate();
+        if(BinaryExpression<bool, T>::has_value()) {
+            return this->left_->evaluate() > this->right_->evaluate();
+        } else {
+            return false;
+        }
     }
 };
 
@@ -214,8 +223,11 @@ public:
     virtual ~GteOperator() {};
 
     virtual bool evaluate() const {
-        BinaryExpression<bool,T>::throwIfNoValue();
-        return this->left_->evaluate() >= this->right_->evaluate();
+        if(BinaryExpression<bool, T>::has_value()) {
+            return this->left_->evaluate() >= this->right_->evaluate();
+        } else {
+            return false;
+        }
     }
 };
 
@@ -235,8 +247,11 @@ public:
     virtual ~LtOperator() {};
 
     virtual bool evaluate() const {
-        BinaryExpression<bool,T>::throwIfNoValue();
-        return this->left_->evaluate() < this->right_->evaluate();
+        if(BinaryExpression<bool, T>::has_value()) {
+            return this->left_->evaluate() < this->right_->evaluate();
+        } else {
+            return false;
+        }
     }
 };
 
@@ -256,8 +271,11 @@ public:
     virtual ~LteOperator() {};
 
     virtual bool evaluate() const {
-        BinaryExpression<bool,T>::throwIfNoValue();
-        return this->left_->evaluate() <= this->right_->evaluate();
+        if(BinaryExpression<bool, T>::has_value()) {
+            return this->left_->evaluate() <= this->right_->evaluate();
+        } else {
+            return false;
+        }
     }
 };
 
@@ -277,8 +295,11 @@ public:
     virtual ~EqOperator() {};
 
     virtual bool evaluate() const {
-        BinaryExpression<bool,T>::throwIfNoValue();
-        return this->left_->evaluate() == this->right_->evaluate();
+        if(BinaryExpression<bool, T>::has_value()) {
+            return this->left_->evaluate() == this->right_->evaluate();
+        } else {
+            return false;
+        }
     }
 };
 
@@ -295,7 +316,8 @@ public:
 
     virtual bool evaluate() const {
 
-        BinaryExpression<bool,unsigned char*>::throwIfNoValue();
+        if(!BinaryExpression<bool, unsigned char*>::has_value())
+            return false;
 
         // If the sizes are equal, compare memory blocks
 
@@ -328,9 +350,11 @@ public:
 
     virtual bool evaluate() const {
 
-        BinaryExpression<bool, T>::throwIfNoValue();
-
-        return this->left_->evaluate() != this->right_->evaluate();
+        if(BinaryExpression<bool, T>::has_value()) {
+            return this->left_->evaluate() != this->right_->evaluate();
+        } else {
+            return false;
+        }
     }
 
 };
@@ -348,7 +372,8 @@ public:
 
     virtual bool evaluate() const {
 
-        BinaryExpression<bool, unsigned char*>::throwIfNoValue();
+        if(!BinaryExpression<bool, unsigned char*>::has_value())
+            return false;
 
         // If the sizes are equal, compare memory blocks
 
@@ -389,7 +414,7 @@ struct ConstantValue : public ExpressionNode<T> {
         // noop for constant
     }
 
-    inline virtual void set_value(std::string key, void* val, DataType::Type type, size_t size=0) {
+    inline virtual void set_value(std::string key, void* val, DataType::Type type, size_t size=0, bool ext=true) {
         // noop for constant
     }
 };
@@ -435,7 +460,7 @@ struct ConstantValue<unsigned char*> : public ExpressionNode<unsigned char*> {
         // noop for constant
     }
 
-    inline virtual void set_value(std::string key, void* val, DataType::Type type, size_t size=0) {
+    inline virtual void set_value(std::string key, void* val, DataType::Type type, size_t size=0, bool ext=true) {
         // noop for constant
     }
     
@@ -492,7 +517,7 @@ struct FieldValue: public ExpressionNode<T> {
     //------------------------------------------------------------
 
     inline virtual void set_value(std::string key, void* val, 
-                                  DataType::Type type, size_t size=0) {
+                                  DataType::Type type, size_t size=0, bool ext=true) {
 
         // If called from a BinaryOperator parent, only set/check the
         // value for the matching field
@@ -548,7 +573,7 @@ struct FieldValue<std::string>: public ExpressionNode<std::string> {
     //------------------------------------------------------------
 
     inline virtual void set_value(std::string key, void* val, 
-                                  DataType::Type type, size_t size=0) {
+                                  DataType::Type type, size_t size=0, bool ext=true) {
 
         // If called from a BinaryOperator parent, only set/check the
         // value for the matching field
@@ -573,13 +598,16 @@ struct FieldValue<std::string>: public ExpressionNode<std::string> {
 
 template<>
 struct FieldValue<unsigned char*>: public ExpressionNode<unsigned char*> {
+
     const std::string field_;
     bool has_val_;
     unsigned char* value_;
+    std::vector<unsigned char> buf_;
+    bool external_;
     size_t size_;
 
     FieldValue(const std::string fieldName, DataType::Type type) : 
-        ExpressionNode<unsigned char*>(type), field_(fieldName), has_val_(false) {}
+    ExpressionNode<unsigned char*>(type), field_(fieldName), has_val_(false), value_(0), external_(false) {}
 
     inline virtual bool has_value() const {
         return has_val_;
@@ -611,7 +639,7 @@ struct FieldValue<unsigned char*>: public ExpressionNode<unsigned char*> {
     //------------------------------------------------------------
 
     inline virtual void set_value(std::string key, void* val, 
-                                  DataType::Type type, size_t size=0) {
+                                  DataType::Type type, size_t size=0, bool ext=true) {
 
         // If called from a BinaryOperator parent, only set/check the
         // value for the matching field
@@ -624,9 +652,17 @@ struct FieldValue<unsigned char*>: public ExpressionNode<unsigned char*> {
             // in the leveldb key for the duration of the expression
             // evaluation
 
-            value_   = *((unsigned char**)val);
+            if(ext) {
+                value_ = *((unsigned char**)val);
+            } else {
+                buf_.resize(size);
+                memcpy((void*)&buf_[0], (void*)val, size);
+                value_ = &buf_[0];
+            }
+
             size_    = size;
             has_val_ = true;
+            external_ = ext;
         }
     }
 

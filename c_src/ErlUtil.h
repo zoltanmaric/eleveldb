@@ -15,7 +15,9 @@
 #include "erl_nif.h"
 #include "workitems.h"
 
-#include<string>
+#include <string>
+#include <cctype>
+#include <climits>
 
 namespace eleveldb {
 
@@ -27,10 +29,13 @@ namespace eleveldb {
         ErlUtil(ErlNifEnv* env=0);
         ErlUtil(ErlNifEnv* env, ERL_NIF_TERM term);
       
-        /**
-         * Destructor.
-         */
+        // Destructor.
+
         virtual ~ErlUtil();
+
+        //=======================================================================
+        // ENIF interface
+        //=======================================================================
 
         void setEnv(ErlNifEnv* env);
         void setTerm(ERL_NIF_TERM term);
@@ -42,6 +47,10 @@ namespace eleveldb {
         bool isBinary();
         bool isBinary(ERL_NIF_TERM term); 
         static bool isBinary(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        bool isInspectableAsBinary();
+        bool isInspectableAsBinary(ERL_NIF_TERM term); 
+        static bool isInspectableAsBinary(ErlNifEnv* env, ERL_NIF_TERM term);
 
         bool isList();
         bool isList(ERL_NIF_TERM term); 
@@ -59,9 +68,41 @@ namespace eleveldb {
         bool isNumber(ERL_NIF_TERM term); 
         static bool isNumber(ErlNifEnv* env, ERL_NIF_TERM term);
 
+        bool isDouble();
+        bool isDouble(ERL_NIF_TERM term); 
+        static bool isDouble(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        bool isInt64();
+        bool isInt64(ERL_NIF_TERM term); 
+        static bool isInt64(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        bool isUint64();
+        bool isUint64(ERL_NIF_TERM term); 
+        static bool isUint64(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        bool isBool();
+        bool isBool(ERL_NIF_TERM term); 
+        static bool isBool(ErlNifEnv* env, ERL_NIF_TERM term);
+
         unsigned listLength();
         unsigned listLength(ERL_NIF_TERM term); 
         static unsigned listLength(ErlNifEnv* env, ERL_NIF_TERM term); 
+
+        double getDouble();
+        double getDouble(ERL_NIF_TERM term);
+        static double getDouble(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        int64_t getInt64();
+        int64_t getInt64(ERL_NIF_TERM term);
+        static int64_t getInt64(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        uint64_t getUint64();
+        uint64_t getUint64(ERL_NIF_TERM term);
+        static uint64_t getUint64(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        bool getBool();
+        bool getBool(ERL_NIF_TERM term);
+        static bool getBool(ErlNifEnv* env, ERL_NIF_TERM term);
 
         std::string getAtom();
         std::string getAtom(ERL_NIF_TERM term);
@@ -70,6 +111,10 @@ namespace eleveldb {
         std::vector<unsigned char> getBinary();
         std::vector<unsigned char> getBinary(ERL_NIF_TERM term);
         static std::vector<unsigned char> getBinary(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        std::vector<unsigned char> getAsBinary();
+        std::vector<unsigned char> getAsBinary(ERL_NIF_TERM term);
+        static std::vector<unsigned char> getAsBinary(ErlNifEnv* env, ERL_NIF_TERM term);
 
         std::string getString();
         std::string getString(ERL_NIF_TERM term);
@@ -101,19 +146,25 @@ namespace eleveldb {
         static uint64_t getValAsUint64(ErlNifEnv* env, ERL_NIF_TERM term, bool exact=true);
         static double   getValAsDouble(ErlNifEnv* env, ERL_NIF_TERM term, bool exact=true);
 
+        std::string formatTerm();
+        std::string formatTerm(ERL_NIF_TERM term);
         static std::string formatTerm(ErlNifEnv* env, ERL_NIF_TERM term);
 
         static std::string formatAtom(  ErlNifEnv* env, ERL_NIF_TERM term);
         static std::string formatBinary(ErlNifEnv* env, ERL_NIF_TERM term);
-
-        static std::string formatBinary(unsigned char* buf, size_t size);
-
         static std::string formatList(  ErlNifEnv* env, ERL_NIF_TERM term);
         static std::string formatNumber(ErlNifEnv* env, ERL_NIF_TERM term);
         static std::string formatString(ErlNifEnv* env, ERL_NIF_TERM term);
         static std::string formatTuple( ErlNifEnv* env, ERL_NIF_TERM term);
         static std::string formatTupleVec(ErlNifEnv* env, std::vector<ERL_NIF_TERM>& tuple);
 
+        static std::string formatBinary(char* data, size_t size);
+        static std::string formatBinary(const char* data, size_t size);
+        static std::string formatBinary(const unsigned char* data, size_t size);
+        static std::string formatBinary(unsigned char* data, size_t size);
+        static std::string formatBinary(std::string& str);
+        static std::string formatBinary(const std::string& str);
+        
     private:
 
         void checkEnv();

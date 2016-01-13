@@ -37,6 +37,11 @@
 
 #include "CmpUtil.h"
 #include "ErlUtil.h"
+#include "EiUtil.h"
+#include "PbUtil.h"
+#include "SysCtl.h"
+
+#include "exceptionutils.h"
 
 #include "leveldb/db.h"
 #include "leveldb/comparator.h"
@@ -87,12 +92,14 @@ static ErlNifFunc nif_funcs[] =
     {"async_iterator_move", 3, eleveldb::async_iterator_move},
 
     {"streaming_start", 4, eleveldb::streaming_start},
-    {"streaming_ack", 2, eleveldb::streaming_ack},
-    {"streaming_stop", 1, eleveldb::streaming_stop},
+    {"streaming_test",  4, eleveldb::streaming_test},
+    {"streaming_ack",   2, eleveldb::streaming_ack},
+    {"streaming_stop",  1, eleveldb::streaming_stop},
 
-    {"current_usec",   0, eleveldb::currentMicroSeconds},
-    {"msgpacktest",    1, eleveldb::msgpacktest},
-    {"eniftest",       1, eleveldb::eniftest},
+    {"current_usec",    0, eleveldb::currentMicroSeconds},
+    {"msgpacktest",     1, eleveldb::msgpacktest},
+    {"eniftest",        1, eleveldb::eniftest},
+    {"statstest",       0, eleveldb::statstest},
 };
 
 
@@ -168,6 +175,8 @@ ERL_NIF_TERM ATOM_LIMIT;
 ERL_NIF_TERM ATOM_UNDEFINED;
 ERL_NIF_TERM ATOM_ENCODING;
 ERL_NIF_TERM ATOM_ERLANG_ENCODING;
+ERL_NIF_TERM ATOM_EI_ENCODING;
+ERL_NIF_TERM ATOM_PB_ENCODING;
 ERL_NIF_TERM ATOM_MSGPACK_ENCODING;
 }   // namespace eleveldb
 
@@ -359,6 +368,7 @@ ERL_NIF_TERM parse_init_option(ErlNifEnv* env, ERL_NIF_TERM item, EleveldbOption
 
 ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Options& opts)
 {
+    COUT("Inside parse_open_optiont");
     int arity;
     const ERL_NIF_TERM* option;
     if (enif_get_tuple(env, item, &arity, &option) && 2==arity)
@@ -528,6 +538,8 @@ ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Optio
                 opts.data_dictionary = &priv.data_dictionary;
                 leveldb::TSTranslator * translator =
                     new leveldb::TSTranslator(opts.data_dictionary);
+
+                COUT("Allocating translator");
                 opts.translator = translator;
                 opts.batch_translator = translator;
             }
@@ -596,6 +608,7 @@ ERL_NIF_TERM parse_streaming_option(ErlNifEnv* env, ERL_NIF_TERM item,
 
         } else if (option[0] == eleveldb::ATOM_RANGE_FILTER) {
 
+            COUT("FOund a range filter");
 	    // Store the rangefilter spec and environment to parse later
 
 	    opts.useRangeFilter_  = true;
@@ -934,8 +947,12 @@ async_write(
     leveldb::KeyTranslator * translator =
         db_ptr->m_Db->GetOptions().translator;
 
+
+    COUT("Using translator = " << translator);
+
     // Seed the batch's data:
     ERL_NIF_TERM result;
+
     if (enif_is_list(env, action_ref)) {
         WriteBatchItemAcc acc(translator, batch);
         result = fold(env, action_ref, write_batch_item, acc);
@@ -1418,9 +1435,15 @@ streaming_start(ErlNifEnv * env,
     // Release so it's destroyed on GC.
     enif_release_resource(sync_handle);
 
-    RangeScanTask * task =
-        new RangeScanTask(env, reply_ref, db_ptr.get(),
+    RangeScanTask * task = 0;
+
+    try {
+        task = new RangeScanTask(env, reply_ref, db_ptr.get(),
                           start_key, end_key_ptr, opts, sync_handle->sync_obj);
+    } catch(std::runtime_error& err) {
+	ERL_NIF_TERM msg_str  = enif_make_string(env, err.what(), ERL_NIF_LATIN1);
+        return enif_make_tuple3(env, eleveldb::ATOM_ERROR, reply_ref, msg_str);
+    }
 
     eleveldb_priv_data& priv =
         *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
@@ -1437,6 +1460,87 @@ streaming_start(ErlNifEnv * env,
                            enif_make_tuple2(env, reply_ref, sync_ref));
 
 } // streaming_start
+
+/**.......................................................................
+ * Start streaming
+ */
+ERL_NIF_TERM
+streaming_test(ErlNifEnv * env,
+                int argc,
+                const ERL_NIF_TERM argv[])
+{
+#if 1
+    const ERL_NIF_TERM db_ref           = argv[0];
+    const ERL_NIF_TERM start_key_term   = argv[1];
+    const ERL_NIF_TERM end_key_term     = argv[2];
+    const ERL_NIF_TERM options_list     = argv[3];
+
+    ReferencePtr<DbObject> db_ptr;
+    db_ptr.assign(DbObject::RetrieveDbObject(env, db_ref));
+
+    bool has_end_key = enif_is_binary(env, end_key_term);
+
+    if (NULL == db_ptr.get()
+        || !enif_is_binary(env, start_key_term)
+        || (!has_end_key && eleveldb::ATOM_UNDEFINED != end_key_term)
+        || !enif_is_list(env, options_list))
+    {
+        return enif_make_badarg(env);
+    }
+
+    if (NULL == db_ptr->m_Db)
+        return error_einval(env);
+
+    ERL_NIF_TERM reply_ref = enif_make_ref(env);
+
+    ErlNifBinary start_key_bin;
+    enif_inspect_binary(env, start_key_term, &start_key_bin);
+    std::string start_key((const char*)start_key_bin.data, start_key_bin.size);
+
+    std::string * end_key_ptr = NULL;
+    std::string end_key;
+    if (has_end_key) {
+        ErlNifBinary end_key_bin;
+        enif_inspect_binary(env, end_key_term, &end_key_bin);
+        end_key.assign((const char*)end_key_bin.data, end_key_bin.size);
+        end_key_ptr = &end_key;
+    }
+
+    RangeScanOptions opts;
+
+    try {
+
+        fold(env, options_list, parse_streaming_option, opts);
+        opts.checkOptions();
+
+    } catch(std::runtime_error& err) {
+	ERL_NIF_TERM msg_str  = enif_make_string(env, err.what(), ERL_NIF_LATIN1);
+        return enif_make_tuple3(env, eleveldb::ATOM_ERROR, reply_ref, msg_str);
+    }
+
+    using eleveldb::RangeScanTask;
+    RangeScanTask::SyncHandle * sync_handle =
+        RangeScanTask::CreateSyncHandle(opts);
+
+    ERL_NIF_TERM sync_ref = enif_make_resource(env, sync_handle);
+    // Release so it's destroyed on GC.
+    enif_release_resource(sync_handle);
+
+    for(unsigned i=0; i < 100; i++) {
+        RangeScanTask * task =
+            new RangeScanTask(env, reply_ref, db_ptr.get(),
+                              start_key, end_key_ptr, opts, sync_handle->sync_obj);
+        
+        delete task;
+    }
+
+    return enif_make_tuple2(env, eleveldb::ATOM_OK,
+                           enif_make_tuple2(env, reply_ref, sync_ref));
+#else
+    return enif_make_tuple2(env, eleveldb::ATOM_OK, eleveldb::ATOM_OK);
+#endif
+
+} // streaming_test
 
 ERL_NIF_TERM
 currentMicroSeconds(
@@ -1476,9 +1580,113 @@ eniftest(
     int argc,
     const ERL_NIF_TERM argv[])
 {
-    ErlUtil erlUtil;
-    COUT(erlUtil.formatTerm(env, argv[0]));
-    return enif_make_atom(env, "ok");
+    try {
+
+        std::vector<ERL_NIF_TERM> cells = ErlUtil::getTupleCells(env, argv[0]);
+        std::string atom  = ErlUtil::formatTerm(env, cells[0]);
+
+        //------------------------------------------------------------
+        // Test throwing exceptions from stdlib
+        //------------------------------------------------------------
+
+        if(atom == "vecbomb") {
+            std::vector<int> testVec(10);
+            testVec.at(20) = 1;
+        }
+
+        //------------------------------------------------------------
+        // Parse a msgpack-encoded map
+        //------------------------------------------------------------
+
+        if(atom == "msgpacktypeparse") {
+            std::vector<unsigned char> bin = ErlUtil::getBinary(env, cells[1]);
+
+            std::map<std::string, eleveldb::DataType::Type> 
+                fieldTypes = CmpUtil::parseMap((const char*)&bin[0], bin.size());
+            CmpUtil::printMap(fieldTypes);
+        }
+
+        //------------------------------------------------------------
+        // Parse a map encoded in ei
+        //------------------------------------------------------------
+
+        if(atom == "erlangtypeparse") {
+            std::vector<unsigned char> bin = ErlUtil::getBinary(env, cells[1]);
+
+            EiUtil eiUtil((char*)&bin[0]);
+
+            std::map<std::string, eleveldb::DataType::Type> 
+                fieldTypes = eiUtil.parseMap();
+            eiUtil.printMap(fieldTypes);
+        }
+        
+        //------------------------------------------------------------
+        // Format a list of tuples and return as protobuf-encoded
+        // binary
+        //------------------------------------------------------------
+
+        if(atom == "pbenc") {
+            return PbUtil::encodeMap(env, cells[1]);
+        }
+
+        if(atom == "pbdec") {
+            return PbUtil::decodeToErl(env, cells[1]);
+        }
+
+        //------------------------------------------------------------
+        // Check if something is a binary
+        //------------------------------------------------------------
+
+        if(atom == "bintest") {
+            COUT("Is binary: " << ErlUtil::isBinary(env, cells[1]));
+            COUT("Can be encoded as binary: " << ErlUtil::isInspectableAsBinary(env, cells[1]));
+        }
+
+        //------------------------------------------------------------
+        // Check if something is a string
+        //------------------------------------------------------------
+
+        if(atom == "strtest") {
+            COUT("Is string: " << ErlUtil::isString(env, cells[1]));
+        }
+
+        if(atom == "atomtest") {
+            COUT("Is atom: " << ErlUtil::isAtom(env, cells[1]));
+        }
+
+        if(atom == "booltest") {
+            COUT("Is bool: " << ErlUtil::isBool(env, cells[1]));
+        }
+
+        return enif_make_atom(env, "ok");
+        
+    } catch(std::runtime_error& err) {
+	ERL_NIF_TERM msg_str  = enif_make_string(env, err.what(), ERL_NIF_LATIN1);
+        return enif_make_tuple2(env, eleveldb::ATOM_ERROR, msg_str);
+    } catch(...) {
+	ERL_NIF_TERM msg_str  = enif_make_string(env, "Unhandled exception caught", ERL_NIF_LATIN1);
+        return enif_make_tuple2(env, eleveldb::ATOM_ERROR, msg_str);
+    }
+}
+
+ERL_NIF_TERM statstest(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    try {
+
+#if 0
+        // Deliberate memory leak!
+
+        char* ptr = (char*)malloc(100000000);
+        COUT("Ptr = " << ptr);
+#endif
+
+        ERL_NIF_TERM name    = enif_make_string(env, "vm", ERL_NIF_LATIN1);
+        ERL_NIF_TERM val     = enif_make_int64(env, SysCtl::getVirtualMemoryUsed());
+        return enif_make_tuple2(env, name, val);
+    } catch(std::runtime_error& err) {
+	ERL_NIF_TERM msg_str = enif_make_string(env, err.what(), ERL_NIF_LATIN1);
+        return enif_make_tuple2(env, eleveldb::ATOM_ERROR, msg_str);
+    }
 }
 
 
@@ -1753,6 +1961,8 @@ try
     ATOM(eleveldb::ATOM_UNDEFINED, "undefined");
     ATOM(eleveldb::ATOM_ENCODING, "encoding");
     ATOM(eleveldb::ATOM_ERLANG_ENCODING,  Encoding::encodingAtom(Encoding::ERLANG).c_str());
+    ATOM(eleveldb::ATOM_EI_ENCODING,  Encoding::encodingAtom(Encoding::EI).c_str());
+    ATOM(eleveldb::ATOM_PB_ENCODING,  Encoding::encodingAtom(Encoding::PB).c_str());
     ATOM(eleveldb::ATOM_MSGPACK_ENCODING, Encoding::encodingAtom(Encoding::MSGPACK).c_str());
 #undef ATOM
 

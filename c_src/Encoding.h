@@ -21,6 +21,8 @@ namespace eleveldb {
             NONE,
             UNKNOWN,
             ERLANG,
+            EI,
+            PB,
             MSGPACK
         };
 

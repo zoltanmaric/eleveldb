@@ -49,7 +49,11 @@
 	 encode/2,
 	 current_usec/0,
 	 msgpacktest/1,
-	 eniftest/1]).
+	 eniftest/1,
+	 statstest/0,
+	 streaming_test/4,
+	 e/0,
+	 e/1]).
 
 %% for testing
 -export([
@@ -333,6 +337,12 @@ async_iterator_close(_CallerRef, _IRef) ->
 streaming_start(_DBRef, _StartKey, _EndKey, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
+-spec streaming_test(db_ref(), binary(), binary() | undefined,
+                      streaming_options()) ->
+    {ok, stream_ref()} | {error, any()}.
+streaming_test(_DBRef, _StartKey, _EndKey, _Opts) ->
+    erlang:nif_error({error, not_loaded}).
+
 -spec streaming_ack(binary(), pos_integer()) -> ok.
 streaming_ack(_AckRef, _NumBytes) ->
     erlang:nif_error({error, not_loaded}).
@@ -354,6 +364,7 @@ do_streaming_batch(Bin, Fun, Acc) ->
 do_streaming_fold(StreamRef = {MsgRef, AckRef}, Fun, Acc) ->
     receive
         {streaming_error, MsgRef, ErrMsg} ->
+	    io:format(user, "Streaming error: ~s~n", [ErrMsg]),
 	    lager:error("Streaming error: ~s~n", [ErrMsg]),
             Acc;
         {streaming_end, MsgRef} ->
@@ -380,6 +391,15 @@ current_usec() ->
 
 eniftest(_) ->
     erlang:nif_error({error, not_loaded}).
+
+statstest() ->
+    erlang:nif_error({error, not_loaded}).
+
+e(Term) ->
+    eniftest(term_to_binary(Term)).
+
+e() ->
+    e({1,2,3}).
 
 msgpacktest(_) ->
     erlang:nif_error({error, not_loaded}).

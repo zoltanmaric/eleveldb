@@ -16,16 +16,16 @@ using namespace eleveldb;
 // Initialize static maps of conversion functions here
 //=======================================================================
 
-std::map<uint8_t, CONV_UINT8_FN(*)>  
+std::map<uint8_t, CMP_CONV_UINT8_FN(*)>  
 CmpUtil::uint8ConvMap_ = CmpUtil::constructUint8Map();
 
-std::map<uint8_t, CONV_INT64_FN(*)>  
+std::map<uint8_t, CMP_CONV_INT64_FN(*)>  
 CmpUtil::int64ConvMap_ = CmpUtil::constructInt64Map();
 
-std::map<uint8_t, CONV_UINT64_FN(*)> 
+std::map<uint8_t, CMP_CONV_UINT64_FN(*)> 
 CmpUtil::uint64ConvMap_ = CmpUtil::constructUint64Map();
 
-std::map<uint8_t, CONV_DOUBLE_FN(*)> 
+std::map<uint8_t, CMP_CONV_DOUBLE_FN(*)> 
 CmpUtil::doubleConvMap_ = CmpUtil::constructDoubleMap();
 
 //=======================================================================
@@ -95,7 +95,7 @@ CmpUtil::doubleConvMap_ = CmpUtil::constructDoubleMap();
 // specified type
 //=======================================================================
 
-#define CONSTRUCT_CONV_MAP(typeTo)                                      \
+#define CONSTRUCT_CMP_CONV_MAP(typeTo)                                      \
     /* char types */                                                    \
     convMap[CMP_TYPE_POSITIVE_FIXNUM] = CmpUtil::convert<typeTo, int8_t>; \
     convMap[CMP_TYPE_NEGATIVE_FIXNUM] = CmpUtil::convert<typeTo, int8_t>; \
@@ -184,7 +184,7 @@ CmpUtil::parseMap(const char* data, size_t size)
       ThrowRuntimeError("Unable to parse data as a msgpack map");
 
     //------------------------------------------------------------
-    // Iterate over the map, ispecting field names
+    // Iterate over the map, inspecting field names
     //------------------------------------------------------------
 
     for(unsigned int i=0; i < map_size; i++) {
@@ -954,32 +954,45 @@ double CmpUtil::objectToDouble(cmp_object_t* obj)
     return 0.0;
 }
 
-std::map<uint8_t, CONV_UINT8_FN(*)>  CmpUtil::constructUint8Map()
+std::map<uint8_t, CMP_CONV_UINT8_FN(*)>  CmpUtil::constructUint8Map()
 {
-    std::map<uint8_t, CONV_UINT8_FN(*)> convMap;
-    CONSTRUCT_CONV_MAP(uint8_t);
+    std::map<uint8_t, CMP_CONV_UINT8_FN(*)> convMap;
+    CONSTRUCT_CMP_CONV_MAP(uint8_t);
     return convMap;
 }
 
-std::map<uint8_t, CONV_INT64_FN(*)>  CmpUtil::constructInt64Map()
+std::map<uint8_t, CMP_CONV_INT64_FN(*)>  CmpUtil::constructInt64Map()
 {
-    std::map<uint8_t, CONV_INT64_FN(*)> convMap;
-    CONSTRUCT_CONV_MAP(int64_t);
+    std::map<uint8_t, CMP_CONV_INT64_FN(*)> convMap;
+    CONSTRUCT_CMP_CONV_MAP(int64_t);
     return convMap;
 }
 
-std::map<uint8_t, CONV_UINT64_FN(*)>  CmpUtil::constructUint64Map()
+std::map<uint8_t, CMP_CONV_UINT64_FN(*)>  CmpUtil::constructUint64Map()
 {
-    std::map<uint8_t, CONV_UINT64_FN(*)> convMap;
-    CONSTRUCT_CONV_MAP(uint64_t);
+    std::map<uint8_t, CMP_CONV_UINT64_FN(*)> convMap;
+    CONSTRUCT_CMP_CONV_MAP(uint64_t);
     return convMap;
 }
 
-std::map<uint8_t, CONV_DOUBLE_FN(*)>  CmpUtil::constructDoubleMap()
+std::map<uint8_t, CMP_CONV_DOUBLE_FN(*)>  CmpUtil::constructDoubleMap()
 {
-    std::map<uint8_t, CONV_DOUBLE_FN(*)> convMap;
-    CONSTRUCT_CONV_MAP(double);
+    std::map<uint8_t, CMP_CONV_DOUBLE_FN(*)> convMap;
+    CONSTRUCT_CMP_CONV_MAP(double);
     return convMap;
 }
 
+/**.......................................................................
+ * Return true if this field is empty
+ */
+bool CmpUtil::isEmptyList(cmp_object_t* obj)
+{
+    if(obj->type != CMP_TYPE_FIXARRAY)
+        return false;
 
+    uint32_t size=0;
+    if(!cmp_object_as_array(obj, &size))
+        return false;
+
+    return size == 0;
+}

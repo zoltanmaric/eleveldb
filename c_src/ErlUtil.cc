@@ -3,11 +3,10 @@
 #include "cmp.h"
 #include "cmp_mem_access.h"
 
-#include <cctype>
-#include <climits>
 #include <cmath>
 
 #include <arpa/inet.h>
+#include <xlocale.h>
 
 using namespace std;
 
@@ -107,6 +106,28 @@ bool ErlUtil::isBinary(ErlNifEnv* env, ERL_NIF_TERM term)
     return enif_is_binary(env, term);
 }
 
+bool ErlUtil::isInspectableAsBinary()
+{
+    checkTerm();
+    return isInspectableAsBinary(term_);
+}
+
+bool ErlUtil::isInspectableAsBinary(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return isInspectableAsBinary(env_, term_);
+}
+
+bool ErlUtil::isInspectableAsBinary(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    try {
+        getAsBinary(env, term);
+        return true;
+    } catch(...) {
+        return false;
+    }
+}
+
 bool ErlUtil::isTuple()
 {
     checkTerm();
@@ -157,8 +178,7 @@ bool ErlUtil::isString(ErlNifEnv* env, ERL_NIF_TERM term)
 
         size = bin.size;
         for(unsigned i=0; i < size; i++) {
-
-            if(!isprint(bin.data[i]))
+            if(!isprint_l(bin.data[i], LC_GLOBAL_LOCALE))
                 return false;
         }
 
@@ -208,6 +228,86 @@ bool ErlUtil::isNumber(ERL_NIF_TERM term)
 bool ErlUtil::isNumber(ErlNifEnv* env, ERL_NIF_TERM term)
 {
     return enif_is_number(env, term);
+}
+
+bool ErlUtil::isBool()
+{
+    checkTerm();
+    return isBool(term_);
+}
+
+bool ErlUtil::isBool(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return isBool(env_, term);
+}
+
+bool ErlUtil::isBool(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    if(isAtom(env, term)) {
+        std::string atom = getAtom(env, term, true);
+        if(atom == "true") {
+            return true;
+        } else if(atom == "false") {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ErlUtil::isDouble()
+{
+    checkTerm();
+    return isDouble(term_);
+}
+
+bool ErlUtil::isDouble(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return isDouble(env_, term);
+}
+
+bool ErlUtil::isDouble(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    double val;
+    return enif_get_double(env, term, &val);
+}
+
+bool ErlUtil::isInt64()
+{
+    checkTerm();
+    return isInt64(term_);
+}
+
+bool ErlUtil::isInt64(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return isInt64(env_, term);
+}
+
+bool ErlUtil::isInt64(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    ErlNifSInt64 val;
+    return enif_get_int64(env, term, &val);
+}
+
+bool ErlUtil::isUint64()
+{
+    checkTerm();
+    return isUint64(term_);
+}
+
+bool ErlUtil::isUint64(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return isUint64(env_, term);
+}
+
+bool ErlUtil::isUint64(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    ErlNifUInt64 val;
+    return enif_get_uint64(env, term, &val);
 }
 
 unsigned ErlUtil::listLength()
@@ -291,6 +391,129 @@ std::vector<unsigned char> ErlUtil::getBinary(ErlNifEnv* env, ERL_NIF_TERM term)
     return ret;
 }
 
+std::vector<unsigned char> ErlUtil::getAsBinary()
+{
+    checkTerm();
+    return getAsBinary(term_);
+}
+
+std::vector<unsigned char> ErlUtil::getAsBinary(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return getAsBinary(env_, term);
+}
+
+std::vector<unsigned char> ErlUtil::getAsBinary(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    std::vector<unsigned char> ret;
+
+    ErlNifBinary bin;
+
+    bool success = false;
+    success = 
+        enif_inspect_binary(env, term, &bin) ||
+        enif_inspect_iolist_as_binary(env, term, &bin);
+
+    if(!success)
+        ThrowRuntimeError("Failed to inspect '" << formatTerm(env, term)
+                          << "' as a binary");
+
+    ret.resize(bin.size);
+    memcpy(&ret[0], bin.data, bin.size);
+
+    return ret;
+}
+
+double ErlUtil::getDouble()
+{
+    checkTerm();
+    return getDouble(term_);
+}
+
+double ErlUtil::getDouble(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return getDouble(env_, term);
+}
+
+double ErlUtil::getDouble(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    double val;
+    if(!enif_get_double(env, term, &val))
+        ThrowRuntimeError("Term: " << formatTerm(env, term) << " isn't a double");
+    return val;
+}
+
+int64_t ErlUtil::getInt64()
+{
+    checkTerm();
+    return getInt64(term_);
+}
+
+int64_t ErlUtil::getInt64(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return getInt64(env_, term);
+}
+
+int64_t ErlUtil::getInt64(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    ErlNifSInt64 val;
+    if(!enif_get_int64(env, term, &val))
+        ThrowRuntimeError("Term: " << formatTerm(env, term) << " isn't an int64");
+    return val;
+}
+
+uint64_t ErlUtil::getUint64()
+{
+    checkTerm();
+    return getUint64(term_);
+}
+
+uint64_t ErlUtil::getUint64(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return getUint64(env_, term);
+}
+
+uint64_t ErlUtil::getUint64(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    ErlNifUInt64 val;
+    if(!enif_get_uint64(env, term, &val))
+        ThrowRuntimeError("Term: " << formatTerm(env, term) << " isn't a uint64");
+    return val;
+}
+
+bool ErlUtil::getBool()
+{
+    checkTerm();
+    return getBool(term_);
+}
+
+bool ErlUtil::getBool(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return getBool(env_, term);
+}
+
+bool ErlUtil::getBool(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    bool val = false;
+
+    if(isAtom(env, term)) {
+        std::string atom = getAtom(env, term, true);
+        if(atom == "true") {
+            val = true;
+        } else if(atom == "false") {
+            val = false;
+        }
+    } else {
+        ThrowRuntimeError("Term: " << formatTerm(env, term) << " isn't a boolean");
+    }
+
+    return val;
+}
+
 std::string ErlUtil::getString()
 {
     checkTerm();
@@ -319,7 +542,6 @@ std::string ErlUtil::getString(ErlNifEnv* env, ERL_NIF_TERM term)
         // If this is a binary, it _could_ be a string
         //------------------------------------------------------------
 
-
     } else if(isBinary(env, term)) {
         ErlNifBinary bin;
 
@@ -332,7 +554,7 @@ std::string ErlUtil::getString(ErlNifEnv* env, ERL_NIF_TERM term)
 
         for(unsigned i=0; i < size; i++) {
 
-            if(isprint(bin.data[i])) {
+            if(isprint_l(bin.data[i], LC_GLOBAL_LOCALE)) {
                 buf[i] = bin.data[i];
             } else {
                 ThrowRuntimeError("Term '" << formatTerm(env, term) 
@@ -1042,6 +1264,18 @@ double ErlUtil::getValAsDouble(ErlNifEnv* env, ERL_NIF_TERM term, bool exact)
 /**.......................................................................
  * Format an erlang value
  */
+std::string ErlUtil::formatTerm()
+{
+    checkTerm();
+    return formatTerm(term_);
+}
+
+std::string ErlUtil::formatTerm(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return formatTerm(env_, term);
+}
+
 std::string ErlUtil::formatTerm(ErlNifEnv* env, ERL_NIF_TERM term)
 {
     if(isAtom(env, term)) {
@@ -1119,7 +1353,15 @@ std::string ErlUtil::formatNumber(ErlNifEnv* env, ERL_NIF_TERM term)
 std::string ErlUtil::formatString(ErlNifEnv* env, ERL_NIF_TERM term)
 {
     std::ostringstream os;
-    os << "\"" << getString(env, term) << "\"";
+    std::string str = getString(env, term);
+    os << "\"" << str << "\"";
+    os << " (aka [";
+    for(unsigned i=0; i < str.size(); i++) {
+        os << (int)str[i];
+        if(i < str.size()-1)
+            os << ", ";
+    }
+    os << "])";
 
     return os.str();
 }
@@ -1159,13 +1401,39 @@ std::string ErlUtil::formatBinary(ErlNifEnv* env, ERL_NIF_TERM term)
     return os.str();
 }
 
-std::string ErlUtil::formatBinary(unsigned char* buf, size_t size)
+std::string ErlUtil::formatBinary(const std::string& str)
+{
+    return formatBinary((std::string&) str);
+}
+
+std::string ErlUtil::formatBinary(std::string& str)
+{
+    return formatBinary(&str[0], str.size());
+}
+
+std::string ErlUtil::formatBinary(unsigned char* data, size_t size)
+{
+    return formatBinary((char*)data, size);
+}
+
+std::string ErlUtil::formatBinary(const unsigned char* data, size_t size)
+{
+    return formatBinary((char*)data, size);
+}
+
+std::string ErlUtil::formatBinary(const char* data, size_t size)
+{
+    return formatBinary((char*)data, size);
+}
+
+std::string ErlUtil::formatBinary(char* data, size_t size)
 {
     std::ostringstream os;
 
     os << "<<";
     for(unsigned iByte=0; iByte < size; iByte++) {
-        os << (int)buf[iByte];
+        unsigned char c = data[iByte];
+        os << (unsigned int)c  << " (" << (char)data[iByte] << ")";
         if(iByte < size-1)
             os << ", ";
     }

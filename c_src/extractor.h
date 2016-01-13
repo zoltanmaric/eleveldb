@@ -12,6 +12,7 @@
 #include "erl_nif.h"
 
 #include "DataType.h"
+#include "PbUtil.h"
 #include "Encoding.h"
 
 //=======================================================================
@@ -44,14 +45,28 @@ public:
 
     eleveldb::DataType::Type cTypeOf(std::string field);
     
-    virtual void parseTypes(const char *data, size_t size) = 0;
-    virtual void parseRiakObjectTypes(const char *data, size_t size) = 0;
-    virtual void extract(const char *data, size_t size, ExpressionNode<bool>* root) = 0;
-    virtual void extractRiakObject(const char *data, size_t size, ExpressionNode<bool>* root) = 0;
-    
+    void parseRiakObjectTypes(const char *data, size_t size);
+
     bool riakObjectContentsCanBeParsed(const char* data, size_t size);
+
     void getToRiakObjectContents(const char* data, size_t size, 
                                  const char** contentsPtr, size_t& contentsSize);
+
+    void getToRiakObjectVclock(const char* data, size_t size, 
+                               const char** contentsPtr, size_t& contentsSize);
+
+    void getToRiakObjectMetaData(const char* data, size_t size, 
+                                 const char** contentsPtr, size_t& contentsSize);
+    
+    void extractRiakObject(const char *data, size_t size, ExpressionNode<bool>* root);
+
+    void parseTypes(const char *data, size_t size);
+
+
+    virtual std::map<std::string, eleveldb::DataType::Type> 
+        parseMap(const char* data, size_t size) = 0;
+
+    virtual void extract(const char *data, size_t size, ExpressionNode<bool>* root) = 0;
     
     DataType::Type convertToSupportedCType(DataType::Type type);
     void printMap(std::map<std::string, DataType::Type>& keyTypeMap);
@@ -64,7 +79,7 @@ public:
 };
 
 //=======================================================================
-// A base class for extracting data encoded in msgpack format
+// A class for extracting data encoded in msgpack format
 //=======================================================================
 
 class ExtractorMsgpack : public Extractor {
@@ -77,8 +92,9 @@ public:
     ExtractorMsgpack();
     ~ExtractorMsgpack();
     
-    void parseTypes(const char *data, size_t size);
-    void parseRiakObjectTypes(const char *data, size_t size);
+    std::map<std::string, eleveldb::DataType::Type> 
+        parseMap(const char *data, size_t size);
+
     void extract(const char *data, size_t size, ExpressionNode<bool>* root);
     void extractRiakObject(const char *data, size_t size, ExpressionNode<bool>* root);
 
@@ -87,6 +103,45 @@ public:
 
     void setStringVal(ExpressionNode<bool>* root, char* key, 
                       cmp_object_t* obj);
+};
+
+//=======================================================================
+// A class for extracting data encoded in term_to_binary format
+//=======================================================================
+
+class ExtractorErlang : public Extractor {
+public:
+
+    ExtractorErlang();
+    ~ExtractorErlang();
+    
+    void setBinaryVal(ExpressionNode<bool>* root, std::string& key, 
+                      char* buf, int* index, bool includeMarker);
+    std::map<std::string, eleveldb::DataType::Type> 
+        parseMap(const char *data, size_t size);
+    void extract(const char* data, size_t size, ExpressionNode<bool>* root);
+};
+
+//=======================================================================
+// A class for extracting data encoded in protobuf format
+//=======================================================================
+
+class ExtractorPb : public Extractor {
+public:
+
+    ExtractorPb();
+    ~ExtractorPb();
+    
+    std::map<std::string, eleveldb::DataType::Type> 
+        parseMap(const char* data, size_t size);
+
+    void setBinaryVal(ExpressionNode<bool>* root, std::string& key, const MapEntry& entry);
+
+    void extract(const char *data, size_t size, ExpressionNode<bool>* root);
+
+private:
+
+    PbUtil::MyFieldMap fieldMap_;
 };
 
 #endif

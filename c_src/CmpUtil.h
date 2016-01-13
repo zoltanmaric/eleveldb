@@ -22,10 +22,10 @@
 
 #include "DataType.h"
 
-#define CONV_UINT8_FN(fn)  uint8_t  (fn)(cmp_object_t* obj)
-#define CONV_INT64_FN(fn)  int64_t  (fn)(cmp_object_t* obj)
-#define CONV_UINT64_FN(fn) uint64_t (fn)(cmp_object_t* obj)
-#define CONV_DOUBLE_FN(fn) double   (fn)(cmp_object_t* obj)
+#define CMP_CONV_UINT8_FN(fn)  uint8_t  (fn)(cmp_object_t* obj)
+#define CMP_CONV_INT64_FN(fn)  int64_t  (fn)(cmp_object_t* obj)
+#define CMP_CONV_UINT64_FN(fn) uint64_t (fn)(cmp_object_t* obj)
+#define CMP_CONV_DOUBLE_FN(fn) double   (fn)(cmp_object_t* obj)
 
 namespace eleveldb {
 
@@ -81,6 +81,8 @@ namespace eleveldb {
 
         static void printMap(std::map<std::string, DataType::Type>& keyValMap);
 
+        static bool isEmptyList(cmp_object_t* obj);
+
         // Object conversion functions
 
         static uint8_t  objectToUint8( cmp_object_t* obj);
@@ -95,17 +97,17 @@ namespace eleveldb {
 
         // Return a map of conversion functions
 
-        static std::map<uint8_t, CONV_UINT8_FN(*)>  constructUint8Map();
-        static std::map<uint8_t, CONV_INT64_FN(*)>  constructInt64Map();
-        static std::map<uint8_t, CONV_UINT64_FN(*)> constructUint64Map();
-        static std::map<uint8_t, CONV_DOUBLE_FN(*)> constructDoubleMap();
+        static std::map<uint8_t, CMP_CONV_UINT8_FN(*)>  constructUint8Map();
+        static std::map<uint8_t, CMP_CONV_INT64_FN(*)>  constructInt64Map();
+        static std::map<uint8_t, CMP_CONV_UINT64_FN(*)> constructUint64Map();
+        static std::map<uint8_t, CMP_CONV_DOUBLE_FN(*)> constructDoubleMap();
 
         // Static maps of conversion functions
 
-        static std::map<uint8_t, CONV_UINT8_FN(*)>  uint8ConvMap_;
-        static std::map<uint8_t, CONV_INT64_FN(*)>  int64ConvMap_;
-        static std::map<uint8_t, CONV_UINT64_FN(*)> uint64ConvMap_;
-        static std::map<uint8_t, CONV_DOUBLE_FN(*)> doubleConvMap_;
+        static std::map<uint8_t, CMP_CONV_UINT8_FN(*)>  uint8ConvMap_;
+        static std::map<uint8_t, CMP_CONV_INT64_FN(*)>  int64ConvMap_;
+        static std::map<uint8_t, CMP_CONV_UINT64_FN(*)> uint64ConvMap_;
+        static std::map<uint8_t, CMP_CONV_DOUBLE_FN(*)> doubleConvMap_;
 
     }; // End class CmpUtil
     

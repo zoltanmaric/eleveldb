@@ -133,7 +133,7 @@ contents(Obj1) ->
 
 
 -type binary_version() :: v0 | v1.
--type encoding() :: erlang | msgpack.
+-type encoding() :: erlang | msgpack | ei | pb.
 
 
 -spec to_binary(binary_version(), riak_object()) -> binary().
@@ -202,12 +202,22 @@ fold_meta_to_bin(Key, Value, {{_Vt,_Del,_Lm}=Elems,RestBin}) ->
 
 encode(Bin, Enc) when Enc == erlang ->
     encode_maybe_binary(Bin);
+encode(Bin, Enc) when Enc == ei ->
+    encode_ei(Bin);
 encode(Bin, Enc) when Enc == msgpack ->
-    encode_msgpack(Bin).
+    encode_msgpack(Bin);
+encode(Bin, Enc) when Enc == pb ->
+    encode_pb(Bin).
 
 encode_msgpack(Bin) ->
     MsgBin = msgpack:pack(Bin, [{format, jsx}]),
     MsgBin.
+
+encode_ei(Bin) ->
+    term_to_binary(Bin).
+
+encode_pb(Bin) ->
+    eleveldb:eniftest({pbenc, Bin}).
 
 em(Bin) ->
     MsgBin = msgpack:pack(Bin, [{format, jsx}]),
@@ -292,11 +302,21 @@ meta_of_binary(<<KeyLen:32/integer, KeyBin:KeyLen/binary, ValueLen:32/integer, V
 decode(ValBin, Enc) when Enc == erlang ->
     decode_maybe_binary(ValBin);
 decode(ValBin, Enc) when Enc == msgpack ->
-    decode_msgpack(ValBin).
+    decode_msgpack(ValBin);
+decode(ValBin, Enc) when Enc == ei ->
+    decode_ei(ValBin);
+decode(ValBin, Enc) when Enc == pb ->
+    decode_pb(ValBin).
 
 decode_msgpack(ValBin) ->
     {ok, Unpacked} = msgpack:unpack(ValBin, [{format, jsx}]),
     Unpacked.
+
+decode_ei(ValBin) ->
+    binary_to_term(ValBin).
+
+decode_pb(ValBin) ->
+    eleveldb:eniftest({pbdec, ValBin}).
 
 decode_maybe_binary(<<1, Bin/binary>>) ->
     Bin;
@@ -345,36 +365,47 @@ myformat(T,Val1, Val2) ->
 %%------------------------------------------------------------
 
 putKeysObj(N) -> 
+    putKeysObj(N, msgpack).
+
+putKeysObj(N, Encoding) -> 
     clearDb(),
-    putKeysObj(open(), N).
-putKeysObj(Ref,N) -> 
-    putKeysObj(Ref,N,1).
-putKeysObj(Ref,N,Acc) when Acc =< N -> 
+    putKeysObj(open(), N, Encoding).
+putKeysObj(Ref,N,Encoding) -> 
+    putKeysObj(Ref,N,1, Encoding).
+putKeysObj(Ref,N,Acc,Encoding) when Acc =< N -> 
     ValList = [{<<"f1">>, Acc},  {<<"f2">>, <<"test2">>}, {<<"f3">>, 3}, {<<"f4">>, [1,2,3]}, {<<"f5">>, false}],
-    addKey(Ref, ValList, Acc, N);
-putKeysObj(Ref,N,Acc) when Acc > N ->
+    addKey(Ref, ValList, Acc, N, Encoding);
+putKeysObj(Ref,N,Acc,_Encoding) when Acc > N ->
     close(Ref).
 
 %%------------------------------------------------------------
 %% Iterative function add a key to the backend
 %%------------------------------------------------------------
 
-addKey(Ref, ValList, Acc, N) ->
+addKey(Ref, ValList, Acc, N, Encoding) ->
     Ndig = trunc(math:log10(N)) + 1,
     Key  = list_to_binary("key" ++ string:right(integer_to_list(Acc), Ndig, $0)),
     Obj  = new(<<"bucket">>, Key, ValList),
-    Val  = to_binary(v1, Obj, msgpack),
+    Val  = to_binary(v1, Obj, Encoding),
     ok   = eleveldb:put(Ref, Key, Val, []),
-    putKeysObj(Ref,N,Acc+1).
+    putKeysObj(Ref,N,Acc+1, Encoding).
+
+getObj(ValList) ->
+    Obj  = new(<<"bucket">>, <<"key">>, ValList),
+    Val  = to_binary(v1, Obj, erlang),
+    {Obj, Val}.
 
 %%------------------------------------------------------------
 %% Explicit function to add a key to the backend
 %%------------------------------------------------------------
 
 addKey(Ref, KeyNum, ValList) ->
+    addKey(Ref, KeyNum, ValList, msgpack).
+
+addKey(Ref, KeyNum, ValList, Encoding) ->
     Key = list_to_binary("key"++integer_to_list(KeyNum)),
     Obj = new(<<"bucket">>, Key, ValList),
-    Val = to_binary(v1, Obj, msgpack),
+    Val = to_binary(v1, Obj, Encoding),
     ok = eleveldb:put(Ref, Key, Val, []).
 
 %%------------------------------------------------------------
@@ -382,12 +413,21 @@ addKey(Ref, KeyNum, ValList) ->
 %%------------------------------------------------------------
 
 getKeyVal(K,V) ->
-    Obj = from_binary(<<"bucket">>, K, V, msgpack),
+    getKeyVal(K,V,msgpack).
+
+getKeyValEi(K,V) ->
+    getKeyVal(K,V,ei).
+
+getKeyValPb(K,V) ->
+    getKeyVal(K,V,pb).
+
+getKeyVal(K,V,Encoding) ->
+    Obj = from_binary(<<"bucket">>, K, V, Encoding),
     [{_,Contents}] = get_contents(Obj),
     Contents.
 
-getKeyVal(B,K,V) ->
-    Obj = from_binary(B, K, V, msgpack),
+getKeyVal(B,K,V,Encoding) ->
+    Obj = from_binary(B, K, V, Encoding),
     [{_,Contents}] = get_contents(Obj),
     Contents.
 
@@ -397,9 +437,16 @@ getKeyVal(B,K,V) ->
 
 streamFoldTest(Filter, PutKeyFun) ->
     clearDb(),
-    Opts=[{fold_method, streaming},
-	  {range_filter, Filter},
-	  {encoding, msgpack}],
+    case Filter of
+	{} ->
+	    Opts=[{fold_method, streaming},
+		  {encoding, msgpack}];
+	_ ->
+	    Opts=[{fold_method, streaming},
+		  {range_filter, Filter},
+		  {encoding, msgpack}]
+    end,
+    io:format("Opts = ~p~n", [lists:flatten(Opts)]),
     Ref = open(),
 
     PutKeyFun(Ref),
@@ -414,16 +461,75 @@ streamFoldTest(Filter, PutKeyFun) ->
     ok = eleveldb:close(Ref),
     lists:reverse(Acc).
 
+streamFoldTestErlang(Filter, PutKeyFun) ->
+    clearDb(),
+    case Filter of
+	{} ->
+	    Opts=[{fold_method, streaming},
+		  {encoding, ei},
+		  {start_key, <<"key1">>}];
+	_ ->
+	    Opts=[{fold_method, streaming},
+		  {range_filter, Filter},
+		  {encoding, ei},
+		  {start_key, <<"key1">>}]
+    end,
+    io:format("Opts = ~p~n", [lists:flatten(Opts)]),
+    Ref = open(),
+
+    PutKeyFun(Ref),
+
+% Build a list of returned keys
+
+    FF = fun({K,V}, Acc) -> 
+		 [getKeyValEi(K,V) | Acc]
+	 end,
+
+    Acc = eleveldb:fold(Ref, FF, [], Opts),
+    ok = eleveldb:close(Ref),
+    lists:reverse(Acc).
+
+streamFoldTestPb(Filter, PutKeyFun) ->
+    clearDb(),
+    case Filter of
+	{} ->
+	    Opts=[{fold_method, streaming},
+		  {encoding, pb},
+		  {start_key, <<"key1">>}];
+	_ ->
+	    Opts=[{fold_method, streaming},
+		  {range_filter, Filter},
+		  {encoding, pb},
+		  {start_key, <<"key1">>}]
+    end,
+    io:format("Opts = ~p~n", [lists:flatten(Opts)]),
+    Ref = open(),
+
+    PutKeyFun(Ref),
+
+% Build a list of returned keys
+
+    FF = fun({K,V}, Acc) -> 
+		 [getKeyValPb(K,V) | Acc]
+	 end,
+
+    Acc = eleveldb:fold(Ref, FF, [], Opts),
+    ok = eleveldb:close(Ref),
+    lists:reverse(Acc).
+
 get_field(Field, List) ->
     lists:keyfind(Field, 1, List).
 
 match([], _, _, _) ->
     0;
+match(List, Field1, Field2, CompFun) when is_binary(Field2) ->
+    {_,Val1} = get_field(Field1, List),
+    {_,Val2} = get_field(Field2, List),
+    Match = match(Val1,Val2,CompFun),
+    Match;
 match(List, Field, CompVal, CompFun) ->
-%    io:format("~p~n", [lists:flatten(List)]),
     {_,Val} = get_field(Field, List),
     Match = match(Val,CompVal,CompFun),
-%    io:format("Checking ~p again ~p match = ~p ~n", [Val, CompVal, Match]),
     Match.
 
 match(V1,{CompVal},CompFun) ->
@@ -437,7 +543,6 @@ match(V1,V2,CompFun) ->
     end.
 
 fieldsMatching(Vals, Field, CompVal, CompFun) ->
-%    io:format("Got Vals = ~p~n", [lists:flatten(Vals)]),
     lists:foldl(fun(Val, {N, Nmatch}) -> 
 			{N + 1, Nmatch + match(Val, Field, CompVal, CompFun)} end, {0,0}, Vals).
 
@@ -468,11 +573,26 @@ packObj_test() ->
 %% Utilities needed for operations tests
 %%-----------------------------------------------------------------------
 
+putKeySingleOpsEi(Ref) ->
+    putKeyNormalOps(Ref, ei).
+
+putKeySingleOpsMsgpack(Ref) ->
+    putKeySingleOps(Ref, msgpack).
+
+putKeySingleOpsPb(Ref) ->
+    putKeyNormalOps(Ref, pb).
+
 putKeyNormalOps(Ref) ->
-    addKey(Ref, 1, [{<<"f1">>, 1}, {<<"f2">>, <<"test1">>}, {<<"f3">>, 1.0}, {<<"f4">>, false}, {<<"f5">>, [1,2,3]}, {<<"f6">>, 1000}]),
-    addKey(Ref, 2, [{<<"f1">>, 2}, {<<"f2">>, <<"test2">>}, {<<"f3">>, 2.0}, {<<"f4">>, true},  {<<"f5">>, [2,3,4]}, {<<"f6">>, 2000}]),
-    addKey(Ref, 3, [{<<"f1">>, 3}, {<<"f2">>, <<"test3">>}, {<<"f3">>, 3.0}, {<<"f4">>, false}, {<<"f5">>, [3,4,5]}, {<<"f6">>, 3000}]),
-    addKey(Ref, 4, [{<<"f1">>, 4}, {<<"f2">>, <<"test4">>}, {<<"f3">>, 4.0}, {<<"f4">>, true},  {<<"f5">>, [4,5,6]}, {<<"f6">>, 4000}]).
+    putKeyNormalOps(Ref, msgpack).
+
+putKeySingleOps(Ref, Encoding) ->
+    addKey(Ref, 1, getBin(), Encoding).
+
+putKeyNormalOps(Ref, Encoding) ->
+    addKey(Ref, 1, [{<<"f1">>, 1}, {<<"f2">>, <<"test1">>}, {<<"f3">>, 1.0}, {<<"f4">>, false}, {<<"f5">>, [1,2,3]}, {<<"f6">>, 1000}], Encoding),
+    addKey(Ref, 2, [{<<"f1">>, 2}, {<<"f2">>, <<"test2">>}, {<<"f3">>, 2.0}, {<<"f4">>, true},  {<<"f5">>, [2,3,4]}, {<<"f6">>, 2000}], Encoding),
+    addKey(Ref, 3, [{<<"f1">>, 3}, {<<"f2">>, <<"test3">>}, {<<"f3">>, 3.0}, {<<"f4">>, false}, {<<"f5">>, [3,4,5]}, {<<"f6">>, 3000}], Encoding),
+    addKey(Ref, 4, [{<<"f1">>, 4}, {<<"f2">>, <<"test4">>}, {<<"f3">>, 4.0}, {<<"f4">>, true},  {<<"f5">>, [4,5,6]}, {<<"f6">>, 4000}], Encoding).
 
 defaultEvalFn({N,Nmatch}) ->
     (N > 0) and (N == Nmatch).
@@ -728,6 +848,15 @@ badBinary_test() ->
     ?assert(Res),
     Res.
 
+badBinary2_test() ->
+    io:format("badBinary_test~n"),
+    F = <<"f2">>,
+    Val = <<"test">>,
+    PutFn = fun putKeyAbnormalOps/1,
+    Res = eqOps({F, {Val}, binary, PutFn, fun({N,_}) -> N == 3 end}),
+    ?assert(Res),
+    Res.
+
 %%-----------------------------------------------------------------------
 %% Test reading data that are not all floats as floats
 %%-----------------------------------------------------------------------
@@ -791,6 +920,12 @@ putKeyMissingOps(Ref) ->
     addKey(Ref, 3, [{<<"f1">>, 3}, {<<"f2">>, "test3"}, {<<"f3">>, 3.0}, {<<"f4">>, false}, {<<"f5">>, [3,4,5]}, {<<"f6">>, 3000}]),
     addKey(Ref, 4, [{<<"f1">>, 4}, {<<"f2">>, "test4"}, {<<"f3">>, 4.0}, {<<"f4">>, true},  {<<"f5">>, [4,5,6]}, {<<"f6">>, 4000}]).
 
+putKeyMissingOps2(Ref) ->
+    addKey(Ref, 1, [{<<"f1">>, 1},  {<<"f2">>, "test1"}, {<<"f3">>, 1.0}, {<<"f4">>, false}, {<<"f5">>, [1,2,3]}, {<<"f6">>, 1000}]),
+    addKey(Ref, 2, [{<<"f1">>, [1]}, {<<"f2">>, "test2"}, {<<"f3">>, 2.0}, {<<"f4">>, true},  {<<"f5">>, [2,3,4]}, {<<"f6">>, 2000}]),
+    addKey(Ref, 3, [{<<"f1">>, 3},  {<<"f2">>, "test3"}, {<<"f3">>, 3.0}, {<<"f4">>, false}, {<<"f5">>, [3,4,5]}, {<<"f6">>, 3000}]),
+    addKey(Ref, 4, [{<<"f1">>, 4},  {<<"f2">>, "test4"}, {<<"f3">>, 4.0}, {<<"f4">>, true},  {<<"f5">>, [4,5,6]}, {<<"f6">>, 4000}]).
+
 %%------------------------------------------------------------
 %% Valid filter, but values are missing for referenced keys
 %%------------------------------------------------------------
@@ -800,7 +935,17 @@ missingKey_test() ->
     F = <<"f1">>,
     Val = 0,
     PutFn = fun putKeyMissingOps/1,
-    EvalFn = fun abnormalEvalFn/1,
+    EvalFn = fun defaultEvalFn/1,
+    Res = gtOps({F, {Val}, integer, PutFn, EvalFn}),
+    ?assert(Res),
+    Res.
+
+missingKey2_test() ->
+    io:format("missingKey_test~n"),
+    F = <<"f1">>,
+    Val = 0,
+    PutFn = fun putKeyMissingOps2/1,
+    EvalFn = fun defaultEvalFn/1,
     Res = gtOps({F, {Val}, integer, PutFn, EvalFn}),
     ?assert(Res),
     Res.
@@ -893,6 +1038,25 @@ scanAll_test() ->
     Res = (Len =:= N),
     ?assert(Res),
     Res.
+
+scanAllIteratorTest() ->
+    N = 100,
+    putKeysObj(N),
+    Opts=[{fold_method, iterator}],
+    FoldFun = fun({K,V}, Acc) -> 
+		      [getKeyVal(K,V) | Acc]
+	      end,
+    streamFoldTestOpts(Opts, FoldFun).
+
+
+scanAllStreamingTest() ->
+    N = 100,
+    putKeysObj(N),
+    Opts=[{fold_method, streaming}],
+    FoldFun = fun({K,V}, Acc) -> 
+		      [getKeyVal(K,V) | Acc]
+	      end,
+    streamFoldTestOpts(Opts, FoldFun).
 
 %%------------------------------------------------------------
 %% Make sure that we iterate over the right number of keys when
@@ -1053,13 +1217,104 @@ badEncodingOptions_test() ->
 encodingOptionsTests() ->
     noEncodingOptions_test() and badEncodingOptions_test().
 
+
+%%=======================================================================
+%% Test field-field ops
+%%=======================================================================
+
+putKeyFieldOps(Ref) ->
+    addKey(Ref, 1, [{<<"f1">>, 1}, {<<"f2">>, <<"test1">>}, {<<"f3">>, 1.0}, {<<"f4">>, false}, {<<"f5">>, [1,2,3]}, {<<"f6">>, 1000}]),
+    addKey(Ref, 2, [{<<"f1">>, 2}, {<<"f2">>, <<"test2">>}, {<<"f3">>, 1.5}, {<<"f4">>, true},  {<<"f5">>, [2,3,4]}, {<<"f6">>, 2000}]),
+    addKey(Ref, 3, [{<<"f1">>, 3}, {<<"f2">>, <<"test3">>}, {<<"f3">>, 3.0}, {<<"f4">>, false}, {<<"f5">>, [3,4,5]}, {<<"f6">>, 3000}]),
+    addKey(Ref, 4, [{<<"f1">>, 4}, {<<"f2">>, <<"test4">>}, {<<"f3">>, 3.5}, {<<"f4">>, true},  {<<"f5">>, [4,5,6]}, {<<"f6">>, 4000}]).
+
+fieldOpsGt_test() ->
+    io:format("fieldOpsGt_test~n"),
+    Cond1 = {'>', {field, <<"f1">>, float}, {field, <<"f3">>, float}},
+    Filter = Cond1,
+    PutFn  = fun sut:putKeyFieldOps/1,
+    Keys = streamFoldTest(Filter, PutFn),
+    {N, NMatch} = fieldsMatching(Keys, <<"f1">>, <<"f3">>,  fun(V1,V2) -> V1 > V2 end),
+    Res = (N == 2) and (NMatch == 2),
+    ?assert(Res),
+    Res.
+
+fieldOpsEq_test() ->
+    io:format("fieldOpsEq_test~n"),
+    Cond1 = {'=', {field, <<"f1">>, float}, {field, <<"f3">>, float}},
+    Filter = Cond1,
+    PutFn  = fun sut:putKeyFieldOps/1,
+    Keys = streamFoldTest(Filter, PutFn),
+    {N, NMatch} = fieldsMatching(Keys, <<"f1">>, <<"f3">>,  fun(V1,V2) -> V1 == V2 end),
+    Res = (N == 2) and (NMatch == 2),
+    ?assert(Res),
+    Res.
+
+fieldOpsLt_test() ->
+    io:format("fieldOpsLt_test~n"),
+    Cond1 = {'<', {field, <<"f3">>, float}, {field, <<"f1">>, float}},
+    Filter = Cond1,
+    PutFn  = fun sut:putKeyFieldOps/1,
+    Keys = streamFoldTest(Filter, PutFn),
+    {N, NMatch} = fieldsMatching(Keys, <<"f3">>, <<"f1">>,  fun(V1,V2) -> V1 < V2 end),
+    Res = (N == 2) and (NMatch == 2),
+    ?assert(Res),
+    Res.
+
+fieldOpsTests() ->
+    fieldOpsEq_test() and fieldOpsGt_test() and fieldOpsLt_test().
+
+%%=======================================================================
+%% Test const-const ops (for completeness)
+%%=======================================================================
+
+constOpsLt_test() ->
+    io:format("constOps_test~n"),
+    Cond1 = {'<', {const, 1}, {const, 2}},
+    Filter = Cond1,
+    PutFn  = fun sut:putKeyFieldOps/1,
+    Keys = streamFoldTest(Filter, PutFn),
+    Res = (length(Keys) == 4),
+    ?assert(Res),
+    Res.
+
+constOpsGt_test() ->
+    io:format("constOpsGt_test~n"),
+    Cond1 = {'>', {const, 1}, {const, 2}},
+    Filter = Cond1,
+    PutFn  = fun sut:putKeyFieldOps/1,
+    Keys = streamFoldTest(Filter, PutFn),
+    Res = (length(Keys) == 0),
+    ?assert(Res),
+    Res.
+
+oneIntOpsTest() ->
+    {"vm", Val} = eleveldb:statstest(),
+    io:format("constOpsGt_test~n"),
+%    Cond1 = {'<', {const, 1}, {const, 2}},
+%    Filter = Cond1,
+    PutFn  = fun sut:putKeyNormalOps/1,
+ %   streamFoldTest(Filter, PutFn),
+    streamFoldTest({}, PutFn),
+    {"vm", Val} = eleveldb:statstest(),
+    ok.
+
+oneScanOpsTest() ->
+    {"vm", Val} = eleveldb:statstest(),
+    scanAll_test(),
+    {"vm", Val} = eleveldb:statstest(),
+    ok.
+
+constOpsTests() ->
+    constOpsGt_test() and constOpsLt_test().
+
 %%------------------------------------------------------------
 %% All tests in this file
 %%------------------------------------------------------------
 
 allTests() ->
     packObj_test() and normalOpsTests() and abnormalOpsTests() and exceptionalTests() 
-	and scanTests()and encodingOptionsTests().
+	and scanTests()and encodingOptionsTests() and fieldOpsTests() and constOpsTests().
 
 %%=======================================================================
 %% Test code to filter & decode TS keys from a leveldb table
@@ -1089,3 +1344,279 @@ readKeysFromTable(Table) ->
 
 r() ->
     readKeysFromTable("1096126227998177188652763624537212264741949407232").
+
+leakTest(N, DoFilter) ->
+    putKeysObj(N),
+    Ref = open(),
+
+    case DoFilter of
+	true ->
+	    FieldCond = {'=', {field, <<"f1">>, integer}, {field, <<"f1">>, integer}},
+	    Opts=[{fold_method, streaming},
+		  {encoding, msgpack},
+		  {range_filter, FieldCond}];
+	false ->
+	    FieldCond = {'!=', {field, <<"f1">>, integer}, {field, <<"f1">>, integer}},
+	    Opts=[{fold_method, streaming},
+		  {encoding, msgpack},
+		  {range_filter, FieldCond}]
+    end,
+
+    FF = fun({K,V}, Acc) -> 
+		 [getKeyVal(K,V) | Acc]
+	 end,
+
+    {"vm", Val1} = eleveldb:statstest(),
+    Acc = eleveldb:fold(Ref, FF, [], Opts),
+    {"vm", Val2} = eleveldb:statstest(),
+
+    ok = eleveldb:close(Ref),
+    lists:reverse(Acc),
+    {Val2 - Val1}.
+
+getBin() ->
+    [{<<"f1">>, 3}, {<<"f2">>, <<"test">>}, {<<"f3">>, 3}, {<<"f4">>, [1,2,3]}, {<<"f5">>, false}].
+
+msgpackTest() ->
+    Bin = msgpack:pack(getBin(), [{format, jsx}]),
+    eleveldb:eniftest({msgpacktypeparse, Bin}).
+
+erlangTest() ->
+    Bin = term_to_binary(getBin()),
+    eleveldb:eniftest({erlangtypeparse, Bin}).
+
+msgOpsTest() ->
+    io:format("erlangOps_test~n"),
+    Cond1 = {'>', {field, <<"f1">>, integer}, {const, 2}},
+    Cond2 = {'=', {field, <<"f3">>, float},   {const, 3.0}},
+    Filter = {'and_', Cond1, Cond2},
+    PutFn  = fun sut:putKeySingleOpsMsgpack/1,
+    Keys = streamFoldTest(Filter, PutFn),
+    Keys.
+
+eiOpsTest() ->
+    io:format("erlangOps_test~n"),
+%    Cond1 = {'>', {field, <<"f1">>, integer}, {const, 2}},
+%    Cond2 = {'=', {field, <<"f3">>, float},   {const, 3.0}},
+%    Filter = {'and_', Cond1, Cond2},
+    Filter = {'=', {field, <<"f2">>, binary}, {const, <<"test3">>}},
+    PutFn  = fun sut:putKeySingleOpsEi/1,
+    Keys = streamFoldTestErlang(Filter, PutFn),
+    Keys.
+
+pbOpsTest() ->
+    io:format("pbOps_test~n"),
+%    Cond1 = {'>', {field, <<"f1">>, integer}, {const, 2}},
+%    Cond2 = {'=', {field, <<"f3">>, float},   {const, 3.0}},
+%    Filter = {'and_', Cond1, Cond2},
+    Filter = {'=', {field, <<"f2">>, binary}, {const, <<"test3">>}},
+    PutFn  = fun sut:putKeySingleOpsPb/1,
+    Keys = streamFoldTestPb(Filter, PutFn),
+    Keys.
+
+pbTest() ->
+    Term = getBin(),
+    Enc = eleveldb:eniftest({pbenc, Term}),
+    Dec = eleveldb:eniftest({pbdec, Enc}),
+    {Term, Dec}.
+
+%=======================================================================
+% IO tests
+%=======================================================================
+
+clearStreamtest() ->
+    os:cmd("rm -rf ./streamtest.out").
+
+%------------------------------------------------------------
+% Perform the iterator comparison Niter times for a database of size N                 
+%------------------------------------------------------------
+
+comptest(N, Niter) -> 
+    comptest(N, Niter, 1).
+
+comptest(N, Niter, Acc) when Acc =< Niter ->
+    comptest(N),
+    comptest(N, Niter, Acc+1);
+comptest(N, Niter, Acc) when Acc > Niter ->
+    io:format("Done with ~B~n", [N]),
+    ok.
+
+%------------------------------------------------------------
+% Perform one iteration of the specified streaming tests
+%------------------------------------------------------------
+
+comptest(N) ->
+
+    % Build the database with msgpack encoding
+
+    putKeysObj(N, msgpack),
+
+    {_, T0} = streamTestIterator(msgpack),
+    {_, T1} = streamTestStreaming(msgpack),
+
+    {_, T2} = streamTestStreamingFilterTwo(msgpack),
+    
+    % Rebuild the database with ei encoding
+
+    putKeysObj(N, ei),
+
+    {_, T3} = streamTestStreamingFilterTwo(ei),
+
+    % Rebuild the database with pb encoding
+
+    putKeysObj(N, pb),
+
+    {_, T4} = streamTestStreamingFilterTwo(pb),
+
+    file:write_file("./streamtest.out", io_lib:fwrite("~B ~B ~B ~B ~B ~B~n", [N, T0, T1, T2, T3, T4]), [append]),
+    T1/T0.
+
+%------------------------------------------------------------
+% Do the whole run
+%------------------------------------------------------------
+
+comptestRun(Niter) ->
+    sut:comptest(1,     Niter),
+    sut:comptest(10,    Niter),
+    sut:comptest(50,    Niter),
+    sut:comptest(100,   Niter),
+    sut:comptest(500,   Niter),
+    sut:comptest(1000,  Niter),
+    sut:comptest(2000,  Niter),
+    sut:comptest(3000,  Niter),
+    sut:comptest(4000,  Niter),
+    sut:comptest(5000,  Niter),
+    sut:comptest(6000,  Niter),
+    sut:comptest(7000,  Niter),
+    sut:comptest(8000,  Niter),
+    sut:comptest(9000,  Niter),
+    sut:comptest(10000, Niter).
+
+%------------------------------------------------------------
+% Just iterate over all keys in the database, using old-style
+% iterators
+%------------------------------------------------------------
+
+streamTestTemplate(BaseOpts, Encoding) ->
+
+    Ref = open(),
+
+    % Do nothing with the return values for now -- just test iterating over them
+
+    FF = fun({_K,_V}, Acc) -> Acc end,
+
+    Opts = [{encoding, Encoding} | BaseOpts],
+    
+    Tstart = eleveldb:current_usec(),
+    eleveldb:fold(Ref, FF, [], Opts),
+    Tstop = eleveldb:current_usec(),
+
+    ok = eleveldb:close(Ref),
+    {0.0, Tstop - Tstart}.
+
+%------------------------------------------------------------
+% Just iterate over all keys in the database, using old-style
+% iterators
+%------------------------------------------------------------
+
+streamTestIterator(Encoding) ->
+    Opts=[{fold_method, iterator}],
+    streamTestTemplate(Opts, Encoding).
+
+%------------------------------------------------------------
+% Just iterate over all keys in the database, using streaming folds
+%------------------------------------------------------------
+
+streamTestStreaming(Encoding) ->
+    Opts=[{fold_method, streaming}],
+    streamTestTemplate(Opts, Encoding).
+
+streamTestStreamingFilterInt(Encoding) ->
+    Filter = {'=', {field, <<"f1">>, integer}, {const, 1}},
+    Opts=[{fold_method, streaming},
+	  {range_filter, Filter}],
+    streamTestTemplate(Opts, Encoding).
+
+streamTestStreamingFilterBin(Encoding) ->
+    Filter = {'=', {field, <<"f2">>, binary}, {const, <<"test3">>}},
+    Opts=[{fold_method, streaming},
+	  {range_filter, Filter}],
+    streamTestTemplate(Opts, Encoding).
+
+streamTestStreamingFilterTwo(Encoding) ->
+    Cond1 = {'=', {field, <<"f1">>, integer}, {const, 1}},
+    Cond2 = {'=', {field, <<"f2">>, binary},  {const, <<"test3">>}},
+    Filter = {'and', Cond1, Cond2},
+    Opts=[{fold_method, streaming},
+	  {range_filter, Filter}],
+    streamTestTemplate(Opts, Encoding).
+
+streamTestStreamingFilterTwoMaxBatchBytes(Encoding) ->
+    Cond1 = {'=', {field, <<"f1">>, integer}, {const, 1}},
+    Cond2 = {'=', {field, <<"f2">>, binary},  {const, <<"test3">>}},
+    Filter = {'and', Cond1, Cond2},
+    Opts=[{fold_method, streaming},
+	  {range_filter, Filter}],
+    streamTestTemplate(Opts, Encoding).
+
+
+    
+
+
+andysTestTemplate(BaseOpts, Encoding) ->
+
+    Ref = open(),
+
+    % Do nothing with the return values for now -- just test iterating over them
+
+    FF = fun({K,V}, Acc) -> 
+		 [getKeyVal(K,V) | Acc]
+	 end,
+
+    Opts = [{encoding, Encoding} | BaseOpts],
+    
+    Acc = eleveldb:fold(Ref, FF, [], Opts),
+
+    ok = eleveldb:close(Ref),
+    lists:reverse(Acc).
+
+andysTest1() ->
+    clearDb(),
+    Ref = open(),
+    addKey(Ref, 1, [{<<"myfamily">>, <<"myfamily">>}, {<<"myseries">>, <<"simpsons halloween special">>}, {<<"time">>, 44}, {<<"weather">>, <<"cloudy">>}, {<<"temperature">>, 33.4}]),
+    addKey(Ref, 2, [{<<"myfamily">>, <<"myfamily">>}, {<<"myseries">>, <<"simpsons halloween special">>}, {<<"time">>, 44}, {<<"weather">>, <<"cloudy">>}, {<<"temperature">>, 33.5}]),
+    addKey(Ref, 3, [{<<"myfamily">>, <<"myfamily">>}, {<<"myseries">>, <<"simpsons halloween special">>}, {<<"time">>, 44}, {<<"weather">>, <<"cloudy">>}, {<<"temperature">>, 33.6}]),
+    eleveldb:close(Ref),
+    Opts=[{fold_method, streaming},
+	  {start_inclusive, true}],
+    andysTestTemplate(Opts, msgpack).
+
+andysTest2() ->
+    clearDb(),
+    Ref = open(),
+    Filter = {'!=', {field, <<"temperature">>, float}, {const, 33.4}},
+    addKey(Ref, 1, [{<<"myfamily">>, <<"myfamily">>}, {<<"myseries">>, <<"simpsons halloween special">>}, {<<"time">>, 44}, {<<"weather">>, <<"cloudy">>}, {<<"temperature">>, 33.4}]),
+    addKey(Ref, 2, [{<<"myfamily">>, <<"myfamily">>}, {<<"myseries">>, <<"simpsons halloween special">>}, {<<"time">>, 44}, {<<"weather">>, <<"cloudy">>}, {<<"temperature">>, 33.5}]),
+    addKey(Ref, 3, [{<<"myfamily">>, <<"myfamily">>}, {<<"myseries">>, <<"simpsons halloween special">>}, {<<"time">>, 44}, {<<"weather">>, <<"cloudy">>}, {<<"temperature">>, 33.6}]),
+    eleveldb:close(Ref),
+    Opts=[{fold_method, streaming},
+	  {range_filter, Filter},
+	  {start_inclusive, true}],
+    andysTestTemplate(Opts, msgpack).
+
+testDecoding(<<3:8/integer, _Bin/binary>>) ->
+    io:format("Got a 3-integer~n");
+testDecoding(<<_Other:8/integer, _Bin/binary>>) ->
+    io:format("Got an Other-integer~n");
+testDecoding(<<_Bin/binary>>) ->
+    io:format("Just got a binary~n").
+
+testEncoding() ->
+    testEncoding(<<-2:6>>).
+    
+testEncoding(Bin) ->
+    testDecoding(<<3:8/integer, Bin/binary>>),
+    testDecoding(<<2:8/integer, Bin/binary>>),
+    testDecoding(<<Bin/binary>>).
+
+    

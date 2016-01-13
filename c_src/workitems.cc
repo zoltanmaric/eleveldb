@@ -487,19 +487,44 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
                              RangeScanOptions & options,
                              SyncObject * sync_obj)
 : WorkTask(caller_env, caller_ref, db_handle),
-    options_(options),
-    start_key_(start_key),
-    has_end_key_(bool(end_key)),
-    sync_obj_(sync_obj)
+  options_(options),
+  start_key_(start_key),
+  has_end_key_(bool(end_key)),
+  sync_obj_(sync_obj),
+  range_filter_(0),
+  extractor_(0)
 {
     if (end_key) {
         end_key_ = *end_key;
     }
+
+    if(options_.useRangeFilter_) {
+        if(options_.encodingType_ == Encoding::MSGPACK) {
+            extractor_ = new ExtractorMsgpack();
+        } else if(options_.encodingType_ == Encoding::EI) {
+            extractor_ = new ExtractorErlang();
+        } else if(options_.encodingType_ == Encoding::PB) {
+            extractor_ = new ExtractorPb();
+        } else {
+            ThrowRuntimeError("An invalid object encoding was specified");
+        }
+    }
+
     sync_obj_->RefInc();
 }
 
 RangeScanTask::~RangeScanTask()
 {
+    if(range_filter_) {
+        delete range_filter_;
+        range_filter_ = 0;
+    }
+    
+    if(extractor_) {
+        delete extractor_;
+        extractor_ = 0;
+    }
+    
     sync_obj_->RefDec();
 }
 
@@ -629,10 +654,9 @@ bool RangeScanTask::SyncObject::IsConsumerDead() const {
 void send_streaming_batch(ErlNifPid * pid, ErlNifEnv * msg_env, ERL_NIF_TERM ref_term,
                 ErlNifBinary * bin) {
     // Binary now owned. No need to release it.
-    ERL_NIF_TERM bin_term = enif_make_binary(msg_env, bin);
+    ERL_NIF_TERM bin_term  = enif_make_binary(msg_env, bin);
     ERL_NIF_TERM local_ref = enif_make_copy(msg_env, ref_term);
-    ERL_NIF_TERM msg =
-        enif_make_tuple3(msg_env, ATOM_STREAMING_BATCH, local_ref, bin_term);
+    ERL_NIF_TERM msg       = enif_make_tuple3(msg_env, ATOM_STREAMING_BATCH, local_ref, bin_term);
     enif_send(NULL, pid, msg_env, msg);
     enif_clear_env(msg_env);
 }
@@ -682,6 +706,7 @@ work_result RangeScanTask::operator()()
     enif_get_local_pid(env, caller_pid_term, &pid);
 
     ErlNifBinary bin;
+    COUT("Max batch bytes = " << options_.max_batch_bytes);
     const size_t initial_bin_size = size_t(options_.max_batch_bytes * 1.1);
     size_t out_offset = 0;
     size_t num_read = 0;
@@ -730,20 +755,21 @@ work_result RangeScanTask::operator()()
                  cmp->Compare(iter->key(), ekey_slice) >= 0
                 ))) {
 
-	  // If data are present in the batch (ie, out_offset != 0),
-	  // send the batch now
+            // If data are present in the batch (ie, out_offset != 0),
+            // send the batch now
 
 	    if (out_offset) {
             
-	      // Shrink it to final size.
+                // Shrink it to final size.
 
-                if (out_offset != bin.size)
+                if (out_offset != bin.size) {
+                    COUT("Reallocing binary");
                     enif_realloc_binary(&bin, out_offset);
+                }
 
                 send_streaming_batch(&pid, msg_env, caller_ref_term, &bin);
                 out_offset = 0;
             }
-
             break;
         }
 
@@ -763,45 +789,47 @@ work_result RangeScanTask::operator()()
 
         if(options_.useRangeFilter_) {
 
-	  try {
-
-	    //------------------------------------------------------------
-	    // If the filter has not yet been parsed, check the data
-	    // types of all fields in this key, then parse the filter,
-	    // so we know which templatized versions of the
-	    // ExpressionNodes to use.  If the data can't be decoded,
-	    // set filter_passed to false to ignore this key.
-	    // ------------------------------------------------------------
-
-	    if(!options_.extractor_->typesParsed_) {
-
+            try {
+                
                 //------------------------------------------------------------
-                // Only attempt to parse the data if it is correctly
-                // formatted, otherwise we would throw an error. 
-                //------------------------------------------------------------
-
-                if(options_.extractor_->riakObjectContentsCanBeParsed(value.data(), value.size())) {
-             
-                    options_.extractor_->parseRiakObjectTypes(value.data(), value.size());
-
+                // If the filter has not yet been parsed, check the data
+                // types of all fields in this key, then parse the filter,
+                // so we know which templatized versions of the
+                // ExpressionNodes to use.  If the data can't be decoded,
+                // set filter_passed to false to ignore this key.
+                // ------------------------------------------------------------
+                
+                if(!extractor_->typesParsed_) {
+                    
                     //------------------------------------------------------------
-                    // Parse the filter here.  We trap the throw error
-                    // here and rethrow, so we can report an
-                    // informative error that the filter was malformed
+                    // Only attempt to parse the data if it is correctly
+                    // formatted, otherwise we would throw an error. 
                     //------------------------------------------------------------
+                    
+                    if(extractor_->riakObjectContentsCanBeParsed(value.data(), value.size())) {
 
-                    try {
-                        options_.range_filter_ = 
-                            parse_range_filter_opts(options_.env_, 
-                                                    options_.rangeFilterSpec_, *(options_.extractor_),
-                                                    throwIfBadFilter);
-                    } catch(std::runtime_error& err) {
-                        std::ostringstream os;
-                        os << err.what() << std::endl << "While processing filter: " 
-                           << ErlUtil::formatTerm(options_.env_, options_.rangeFilterSpec_);
+                        extractor_->parseRiakObjectTypes(value.data(), value.size());
+                        
+                        //------------------------------------------------------------
+                        // Parse the filter here.  We trap the throw error
+                        // here and rethrow, so we can report an
+                        // informative error that the filter was malformed
+                        //------------------------------------------------------------
+                        
+                        try {
 
-                        ThrowRuntimeError(os.str());
-                    }
+                            range_filter_ = 
+                                parse_range_filter_opts(options_.env_, 
+                                                        options_.rangeFilterSpec_, *(extractor_),
+                                                        throwIfBadFilter);
+
+                        } catch(std::runtime_error& err) {
+                            std::ostringstream os;
+                            os << err.what() << std::endl << "While processing filter: " 
+                               << ErlUtil::formatTerm(options_.env_, options_.rangeFilterSpec_);
+                            
+                            ThrowRuntimeError(os.str());
+                        }
 
                     //------------------------------------------------------------
                     // If this value can't be parsed, set
@@ -822,8 +850,8 @@ work_result RangeScanTask::operator()()
 	    // expression tree.  In this case, we don't bother
 	    // extracting the data or evaluating the filter
 	    //------------------------------------------------------------
-
-            if(options_.range_filter_) {
+            
+            if(range_filter_) {
 
                 //------------------------------------------------------------
                 // Also check if the key can be parsed.  If TS-encoded
@@ -831,15 +859,16 @@ work_result RangeScanTask::operator()()
                 // causes us to ignore the non-TS-encoded data
                 //------------------------------------------------------------
 
-                if(options_.extractor_->riakObjectContentsCanBeParsed(value.data(), value.size())) {
+                if(extractor_->riakObjectContentsCanBeParsed(value.data(), value.size())) {
 
-                    options_.extractor_->extractRiakObject(value.data(), value.size(), options_.range_filter_);
-            
+                    extractor_->extractRiakObject(value.data(), value.size(), range_filter_);
+
                     //------------------------------------------------------------
                     // Now evaluate the filter, but only if we have a valid filter
                     //------------------------------------------------------------
             
-                    filter_passed = options_.range_filter_->evaluate();
+                    filter_passed = range_filter_->evaluate();
+                    COUT("Key = " << key.data() << " passed = " << filter_passed);
                 }
             }
 
@@ -862,6 +891,7 @@ work_result RangeScanTask::operator()()
         if (filter_passed) {
 	  
             key_buffer.resize(0);
+            COUT("About to translate");
             translator->TranslateInternalKey(key, &key_buffer);
 
             const size_t ksz = key_buffer.size();
@@ -884,8 +914,10 @@ work_result RangeScanTask::operator()()
             // reached the batch max anyway and will send it right away
 	    //------------------------------------------------------------
 
-            if(next_offset > bin.size)
+            if(next_offset > bin.size) {
+                COUT("Reallocing binary");
                 enif_realloc_binary(&bin, next_offset);
+            }
 
             char * const out = (char*)bin.data + out_offset;
 
@@ -897,6 +929,8 @@ work_result RangeScanTask::operator()()
 
             out_offset = next_offset;
 	    
+#if 1
+
 	    //------------------------------------------------------------
 	    // If we've reached the maximum number of bytes to include in
 	    // the batch, possibly shrink the binary and send it
@@ -904,8 +938,10 @@ work_result RangeScanTask::operator()()
 
             if(out_offset >= options_.max_batch_bytes) {
 
-                if(out_offset != bin.size)
+                if(out_offset != bin.size) {
+                    COUT("Reallocing binary");
                     enif_realloc_binary(&bin, out_offset);
+                }
 
                 send_streaming_batch(&pid, msg_env, caller_ref_term, &bin);
 
@@ -915,7 +951,7 @@ work_result RangeScanTask::operator()()
 
                 out_offset = 0;
 	    }
-
+#endif
 	    //------------------------------------------------------------
 	    // Increment the number of keys read and step to the next
 	    // key
