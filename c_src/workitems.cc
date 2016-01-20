@@ -818,7 +818,7 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
     }
 
     if(options_.isBigset_) {
-      bigset_acc_.reset( new basho::Bigset::BigsetAccumulator() );
+      bigset_acc_.reset( new basho::bigset::BigsetAccumulator() );
     }
     
     if(!sync_obj_) {
