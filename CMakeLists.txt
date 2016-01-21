@@ -24,7 +24,6 @@ set(ELEVELDB_SRCS
         c_src/BigsetAccumulator.cc
         c_src/BigsetClock.cc
         c_src/BigsetKey.cc
-        c_src/buffer.h
         c_src/cmp.cc
         c_src/CmpUtil.cc
         c_src/CrdtUtils.h
@@ -41,7 +40,9 @@ set(ELEVELDB_SRCS
         c_src/StringBuf.cc
         c_src/threading.cc
         c_src/work_result.hpp
-        c_src/workitems.cc)
+        c_src/workitems.cc
+        c_src/util/buffer.h
+        c_src/util/slice.h)
 
 add_library(eleveldb ${ELEVELDB_SRCS})
 

@@ -2,7 +2,7 @@
 #include <iostream>
 #include <fstream>
 
-#include "../buffer.h"
+#include "../util/buffer.h"
 #include "../BigsetClock.h"
 
 typedef basho::utils::Buffer<1024> Buffer;
@@ -157,7 +157,7 @@ int main( int argc, char** argv )
         printf( "       : %zd bytes\n", binaryByteCount );
 
         // now create a BigsetClock object from the byte stream
-        leveldb::Slice binaryValue( binaryBuff.GetCharBuffer(), binaryByteCount );
+        basho::utils::Slice binaryValue( binaryBuff.GetCharBuffer(), binaryByteCount );
         basho::bigset::BigsetClock bigsetClock;
         std::string errStr;
         if ( !basho::bigset::BigsetClock::ValueToBigsetClock( binaryValue, bigsetClock, errStr ) )

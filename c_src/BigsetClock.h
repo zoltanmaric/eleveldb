@@ -5,16 +5,16 @@
 #ifndef BASHO_BIGSET_CLOCK_H
 #define BASHO_BIGSET_CLOCK_H
 
-#include "leveldb/slice.h"
+#include "util/slice.h"
 #include "CrdtUtils.h"
 
 namespace basho {
 namespace bigset {
 
-typedef leveldb::Slice ErlTerm;
-typedef uint32_t       ErlCounter;
+typedef utils::Slice ErlTerm;
+typedef uint32_t     ErlCounter;
 
-typedef leveldb::Slice     Slice;
+typedef utils::Slice       Slice;
 typedef uint64_t           Counter;
 typedef std::list<Counter> CounterList;
 
@@ -104,9 +104,9 @@ public:
     // creating a BigsetClock object
     static bool // returns true if the binary value was successfully converted to a BigsetClock, else returns false
     ValueToBigsetClock(
-        const leveldb::Slice& Value,   // IN:  serialized bigset clock
-        BigsetClock&          Clock,   // OUT: receives the parsed bigset clock
-        std::string&          Error ); // OUT: if false returned, contains a description of the error
+        const utils::Slice& Value,   // IN:  serialized bigset clock
+        BigsetClock&        Clock,   // OUT: receives the parsed bigset clock
+        std::string&        Error ); // OUT: if false returned, contains a description of the error
 
 private:
     // helper methods used by ValueToBigsetClock()

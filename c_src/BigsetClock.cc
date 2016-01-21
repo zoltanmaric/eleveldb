@@ -95,9 +95,9 @@ BigsetClock::ToString() const
 //
 bool // returns true if the binary value was successfully converted to a BigsetClock, else returns false
 BigsetClock::ValueToBigsetClock(
-    const leveldb::Slice& Value,   // IN:  serialized bigset clock
-    BigsetClock&          Clock,   // OUT: receives the parsed bigset clock
-    std::string&          Error )  // OUT: if false returned, contains a description of the error
+    const utils::Slice& Value,   // IN:  serialized bigset clock
+    BigsetClock&        Clock,   // OUT: receives the parsed bigset clock
+    std::string&        Error )  // OUT: if false returned, contains a description of the error
 {
     // initialize the caller's output parameters
     Clock.Clear();

@@ -108,4 +108,4 @@ public:
 } // namespace utils
 } // namespace basho
 
-#endif //BASHOUTILS_BUFFER_H
+#endif // BASHOUTILS_BUFFER_H
