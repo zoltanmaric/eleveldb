@@ -64,7 +64,8 @@ void basho::bigset::BigsetAccumulator::AddRecord( ErlTerm key, ErlTerm value )
             m_CurrentElement = keyToAdd.GetElement();
 
             BigsetClock currentClock;
-            if ( !BigsetClock::ValueToBigsetClock( value, currentClock ) )
+            std::string error;
+            if ( !BigsetClock::ValueToBigsetClock( value, currentClock, error ) )
             {
                 // TODO: handle error converting value to a bigset clock
             }

@@ -118,6 +118,8 @@ int main( int argc, char** argv )
         return 2;
     }
 
+    int retVal = 0;
+
     // each line of text in the file is expected to be of the form "Erlang tuple : <<bytes>>"
     int lineCount = 0;
     std::string line;
@@ -133,6 +135,7 @@ int main( int argc, char** argv )
         if ( separator == std::string::npos )
         {
             printf( "Line %d (%s) not in the expected format\n", lineCount, line.c_str() );
+            retVal = 10;
             break;
         }
 
@@ -148,6 +151,7 @@ int main( int argc, char** argv )
         if ( 0 == binaryByteCount )
         {
             printf( "Unable to parse the bigset binary string '%s'\n", binaryStr.c_str() );
+            retVal = 11;
             break;
         }
         printf( "       : %zd bytes\n", binaryByteCount );
@@ -155,9 +159,11 @@ int main( int argc, char** argv )
         // now create a BigsetClock object from the byte stream
         leveldb::Slice binaryValue( binaryBuff.GetCharBuffer(), binaryByteCount );
         basho::bigset::BigsetClock bigsetClock;
-        if ( !basho::bigset::BigsetClock::ValueToBigsetClock( binaryValue, bigsetClock ) )
+        std::string errStr;
+        if ( !basho::bigset::BigsetClock::ValueToBigsetClock( binaryValue, bigsetClock, errStr ) )
         {
-            printf( "Unable to construct a BigsetClock from the binary string '%s'\n", binaryStr.c_str() );
+            printf( "Unable to construct a BigsetClock from the binary string '%s'\nERROR: %s\n", binaryStr.c_str(), errStr.c_str() );
+            retVal = 12;
             break;
         }
 
@@ -167,11 +173,12 @@ int main( int argc, char** argv )
         if ( bigsetClockStr != termStr )
         {
             printf( "BigsetClock.ToString() '%s' does not match Erlang term from file '%s'\n", bigsetClockStr.c_str(), termStr.c_str() );
+            retVal = 13;
             break;
         }
 
         //if ( lineCount  > 10 ) break;
     }
     printf( "Processed %d lines\n", lineCount );
-    return 0;
+    return retVal;
 }

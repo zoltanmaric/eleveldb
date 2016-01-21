@@ -124,8 +124,7 @@ static leveldb::Slice GetTsb( leveldb::Slice& s )
 
 static leveldb::Slice GetKeyType( leveldb::Slice& s )
 {
-    leveldb::Slice
-            res = leveldb::Slice( s.data(), 1 ); // one byte c, e, or z
+    leveldb::Slice res = leveldb::Slice( s.data(), 1 ); // one byte c, e, or z
     s.remove_prefix( 1 );
     return res;
 }
