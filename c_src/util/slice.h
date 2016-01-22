@@ -85,33 +85,33 @@ public:
     }
 };
 
-inline bool operator==( const Slice& x, const Slice& y )
+inline bool operator==( const Slice& X, const Slice& Y )
 {
-    return ((x.size() == y.size()) &&
-            (::memcmp( x.data(), y.data(), x.size() ) == 0));
+    return ((X.size() == Y.size()) &&
+            (::memcmp( X.data(), Y.data(), X.size() ) == 0));
 }
 
-inline bool operator!=( const Slice& x, const Slice& y )
+inline bool operator!=( const Slice& X, const Slice& Y )
 {
-    return !(x == y);
+    return !(X == Y);
 }
 
-inline int Slice::compare( const Slice& b ) const
+inline int Slice::compare( const Slice& That ) const
 {
-    const int min_len = (m_Size < b.m_Size) ? m_Size : b.m_Size;
-    int       r       = ::memcmp( m_Data, b.m_Data, min_len );
-    if ( r == 0 )
+    const int minLen = (m_Size < That.m_Size) ? m_Size : That.m_Size;
+    int       retVal = ::memcmp( m_Data, That.m_Data, minLen );
+    if ( retVal == 0 )
     {
-        if ( m_Size < b.m_Size )
+        if ( m_Size < That.m_Size )
         {
-            r = -1;
+            retVal = -1;
         }
-        else if ( m_Size > b.m_Size )
+        else if ( m_Size > That.m_Size )
         {
-            r = 1;
+            retVal = 1;
         }
     }
-    return r;
+    return retVal;
 }
 
 } // namespace utils
