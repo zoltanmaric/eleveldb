@@ -1,4 +1,5 @@
 #include "BigsetAccumulator.h"
+#include "BigsetKey.h"
 
 namespace basho {
 namespace bigset {
@@ -9,8 +10,8 @@ void BigsetAccumulator::FinalizeElement()
     if ( !remainingDots.IsEmpty() )
     {
         // this element is "in" the set locally
-        m_ReadyKey    = m_CurrentElement;
-        //m_ReadyValue  = remainingDots.ToValue();
+        m_ReadyKey    = m_CurrentElement; // TODO: transfer the buffer if possible
+        //m_ReadyValue  = remainingDots.ToValue(); // TODO: format is term_to_binary() formatted list of 2-tuples {actor,integer}
         m_RecordReady = true;
 
         m_CurrentContext.Clear();
@@ -18,17 +19,18 @@ void BigsetAccumulator::FinalizeElement()
     }
 }
 
-void basho::bigset::BigsetAccumulator::AddRecord( ErlTerm key, ErlTerm value )
+void basho::bigset::BigsetAccumulator::AddRecord( Slice key, Slice value )
 {
     BigsetKey keyToAdd( key );
     if ( keyToAdd.IsValid() )
     {
-        if ( m_CurrentSetName.empty() )
+        const Slice& setName( keyToAdd.GetSetName() );
+        if ( m_CurrentSetName.IsEmpty() )
         {
             // this is the first record for this bigset, so save the set's name
-            m_CurrentSetName = keyToAdd.GetSetName();
+            m_CurrentSetName.Assign( setName );
         }
-        else if ( m_CurrentSetName != keyToAdd.GetSetName() )
+        else if ( m_CurrentSetName != setName )
         {
             // this is unexpected; we didn't hit an "end" key for the bigset
             // TODO: handle unexpected set name change
@@ -37,31 +39,35 @@ void basho::bigset::BigsetAccumulator::AddRecord( ErlTerm key, ErlTerm value )
         if ( keyToAdd.IsClock() )
         {
             // we have a clock key; see if it's for the actor we're tracking; if not, we ignore this clock
-            if ( 0 == m_ThisActor.size() )
+            const Slice& actor( keyToAdd.GetActor() );
+            // TODO: the actor needs to be specified by the user doing the fold
+            if ( m_ThisActor.IsClear() )
             {
                 // this is the first clock key we've seen for this bigset, so save its associated actor
-                m_ThisActor = keyToAdd.GetActor();
+                m_ThisActor.SetId( actor );
             }
-            else if ( keyToAdd.GetActor() == m_ThisActor )
+            else if ( m_ThisActor == actor )
             {
                 // get the clock value for this actor
+
+                // TODO: return the key/value for this actor as-is as a record in the fold
             }
             else
             {
-                // ignore this actor; not the one we care about
+                // ignore this actor; it's not the one we care about
             }
         }
         else if ( keyToAdd.IsElement() )
         {
             // we have an element key; see if it's for the current element we're processing
-            if ( keyToAdd.GetElement() != m_CurrentElement )
+            if ( !m_CurrentElement.IsEmpty() && m_CurrentElement != keyToAdd.GetElement() )
             {
                 // we are starting a new element, so finish processing of the previous element
                 FinalizeElement();
             }
 
             // accumulate values
-            m_CurrentElement = keyToAdd.GetElement();
+            m_CurrentElement.Assign( keyToAdd.GetElement() );
 
             BigsetClock currentClock;
             std::string error;
@@ -70,9 +76,15 @@ void basho::bigset::BigsetAccumulator::AddRecord( ErlTerm key, ErlTerm value )
                 // TODO: handle error converting value to a bigset clock
             }
             m_CurrentContext.Merge( currentClock );
-            //m_CurrentDots.AddDot( keyToAdd.GetActor(),
-            //                      keyToAdd.GetCounter(),
-            //                      keyToAdd.GetTombstone() );
+
+            Actor actor;
+            if ( !actor.SetId( keyToAdd.GetActor() ) )
+            {
+                // TODO: handle error creating an Actor object
+            }
+            m_CurrentDots.AddDot( actor,
+                                  keyToAdd.GetCounter(),
+                                  keyToAdd.GetTombstone() );
         }
         else if ( keyToAdd.IsEnd() )
         {

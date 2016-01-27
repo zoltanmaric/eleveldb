@@ -1,7 +1,11 @@
 project(eleveldb)
 cmake_minimum_required(VERSION 3.3)
 
-set(CMAKE_CXX_FLAGS "-Wall -O0 -g3 -std=c++11 -stdlib=libc++")
+# set GTEST_DIR and ERLANG_INCLUDE_DIR in the shell env?
+set(GTEST_DIR "/Users/pplace/github/googletest/googletest")
+set(ERLANG_INCLUDE_DIR "/Users/pplace/erlang/R16B02/usr/include")
+
+set(CMAKE_CXX_FLAGS "-Wall -O0 -g3 -std=c++11 -stdlib=libc++ -Wno-deprecated -pthread")
 
 add_subdirectory("c_src/leveldb")
 
@@ -15,10 +19,13 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     add_definitions(-DOS_FREEBSD)
 endif ()
 
+add_library(gtest_all STATIC ${GTEST_DIR}/src/gtest-all.cc)
+add_library(gtest_main STATIC ${GTEST_DIR}/src/gtest_main.cc)
+
 # eleveldb source files
 #
 # NOTE: selected header files are included to make CLion happy
-include_directories(${CMAKE_CURRENT_SOURCE_DIR} c_src/leveldb/include /Users/pplace/erlang/R16B02/usr/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} c_src c_src/util c_src/leveldb/include ${ERLANG_INCLUDE_DIR} ${GTEST_DIR}/include ${GTEST_DIR})
 set(ELEVELDB_SRCS
         c_src/atoms.h
         c_src/BigsetAccumulator.cc
@@ -41,9 +48,14 @@ set(ELEVELDB_SRCS
         c_src/threading.cc
         c_src/work_result.hpp
         c_src/workitems.cc
-        c_src/util/buffer.h
-        c_src/util/slice.h)
+        c_src/util/buffer.h)
 
 add_library(eleveldb ${ELEVELDB_SRCS})
 
-add_executable(bigsetClockTest c_src/test/bigsetClockTest.cc c_src/BigsetClock.cc)
+add_executable(bigsetClockValidationTool c_src/test/bigsetClockValidationTool.cc c_src/BigsetClock.cc)
+
+add_executable(bigsetClock_test c_src/test/bigsetClock_test.cc c_src/BigsetClock.cc)
+target_link_libraries(bigsetClock_test gtest_main gtest_all)
+
+add_executable(buffer_test c_src/util/test/buffer_test.cc)
+target_link_libraries(buffer_test gtest_main gtest_all)

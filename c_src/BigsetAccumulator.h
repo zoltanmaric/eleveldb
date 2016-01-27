@@ -7,8 +7,8 @@
 
 #include <list>
 
-#include "BigsetKey.h"
 #include "BigsetClock.h"
+#include "util/buffer.h"
 
 namespace basho {
 namespace bigset {
@@ -16,38 +16,45 @@ namespace bigset {
 class BigsetAccumulator
 {
 private:
-    ErlTerm     m_ThisActor;
-    ErlTerm     m_CurrentSetName;
-    ErlTerm     m_CurrentElement;
+    typedef utils::Buffer<32> Buffer;
+
+    Actor       m_ThisActor;
+    Buffer      m_CurrentSetName;
+    Buffer      m_CurrentElement;
     BigsetClock m_CurrentContext;
     Dots        m_CurrentDots;
 
-    ErlTerm m_ReadyKey;
-    ErlTerm m_ReadyValue;
-    bool    m_RecordReady;
+    Buffer      m_ReadyKey;
+    Buffer      m_ReadyValue;
+    bool        m_RecordReady;
 
     void FinalizeElement();
 
 public:
-    BigsetAccumulator() : m_RecordReady( false ) { }
+    BigsetAccumulator() : m_RecordReady( false )
+    { }
 
     ~BigsetAccumulator() { }
 
-    void AddRecord( ErlTerm key, ErlTerm value );
+    void AddRecord( Slice key, Slice value );
 
     bool
-    recordReady()
+    RecordReady()
     {
         return m_RecordReady;
     }
 
     void
-    getCurrentElement( leveldb::Slice& key, leveldb::Slice& value )
+    GetCurrentElement( Slice& key, Slice& value )
     {
         if ( m_RecordReady )
         {
-            key           = m_ReadyKey;
-            value         = m_ReadyValue;
+            Slice readyKey( m_ReadyKey.GetCharBuffer(), m_ReadyKey.GetBuffSize() );
+            key = readyKey;
+
+            Slice readyValue( m_ReadyValue.GetCharBuffer(), m_ReadyValue.GetBuffSize() );
+            value = readyValue;
+
             m_RecordReady = false; // prepare for the next record
         }
     }

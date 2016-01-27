@@ -29,6 +29,64 @@ TEST(Buffer, Ctor)
     ASSERT_EQ( BUILTIN_BUFF_SIZE, buff3.GetBuiltinBuffSize() );
 }
 
+TEST(Buffer, CopyCtor)
+{
+    std::string smallStr( "abc" );
+    std::string largeStr( "This is a much longer string that smallStr, but it isn't really that long, now is it?" );
+
+    Buffer<10> buffUsesBuiltIn;
+    buffUsesBuiltIn.Assign( smallStr.c_str(), smallStr.size() + 1 );
+
+    Buffer<10> buffUsesHeap;
+    buffUsesHeap.Assign( largeStr.c_str(), largeStr.size() + 1 );
+
+    // now use the copy ctor, one which will use the built-in buffer, one that uses the heap
+    Buffer<10> copyBuiltIn( buffUsesBuiltIn );
+    ASSERT_EQ( 10, copyBuiltIn.GetBuffSize() );
+    ASSERT_EQ( smallStr.size() + 1, copyBuiltIn.GetBytesUsed() );
+    ASSERT_EQ( 0, ::strcmp( smallStr.c_str(), copyBuiltIn.GetCharBuffer() ) );
+
+    Buffer<10> copyHeap( buffUsesHeap );
+    ASSERT_LT( 10, copyHeap.GetBuffSize() );
+    ASSERT_EQ( largeStr.size() + 1, copyHeap.GetBytesUsed() );
+    ASSERT_EQ( 0, ::strcmp( largeStr.c_str(), copyHeap.GetCharBuffer() ) );
+}
+
+
+TEST(Buffer, AssignmentOperator)
+{
+    std::string smallStr( "abc" );
+    std::string largeStr( "This is a much longer string that smallStr, but it isn't really that long, now is it?" );
+
+    Buffer<10> buffUsesBuiltIn;
+    buffUsesBuiltIn.Assign( smallStr.c_str(), smallStr.size() + 1 );
+
+    Buffer<10> buffUsesHeap;
+    buffUsesHeap.Assign( largeStr.c_str(), largeStr.size() + 1 );
+
+    // now use the assignment operator a few times
+    Buffer<10> target;
+    target = buffUsesBuiltIn;
+    ASSERT_EQ( 10, target.GetBuffSize() );
+    ASSERT_EQ( smallStr.size() + 1, target.GetBytesUsed() );
+    ASSERT_EQ( 0, ::strcmp( smallStr.c_str(), target.GetCharBuffer() ) );
+
+    target = buffUsesHeap;
+    ASSERT_LT( 10, target.GetBuffSize() );
+    ASSERT_EQ( largeStr.size() + 1, target.GetBytesUsed() );
+    ASSERT_EQ( 0, ::strcmp( largeStr.c_str(), target.GetCharBuffer() ) );
+
+    target = buffUsesBuiltIn; // this will not shrink the buffer for target
+    ASSERT_EQ( smallStr.size() + 1, target.GetBytesUsed() );
+    ASSERT_EQ( 0, ::strcmp( smallStr.c_str(), target.GetCharBuffer() ) );
+
+    // ensure that assigning target to itself doesn't do anything bad
+    Buffer<10>& buffRef( target );
+    buffRef = target;
+    ASSERT_EQ( smallStr.size() + 1, target.GetBytesUsed() );
+    ASSERT_EQ( 0, ::strcmp( smallStr.c_str(), target.GetCharBuffer() ) );
+}
+
 TEST(Buffer, EnsureSize)
 {
     const size_t BUILTIN_BUFF_SIZE = 100;
@@ -134,31 +192,35 @@ TEST(Buffer, BytesUsedTest)
     ASSERT_EQ( 0, buff.GetBytesUsed() );
 
     // set the "bytes used" value and ensure we get it back
-    ASSERT_TRUE( buff.SetBytesUsed( 1 ) );
+    buff.SetBytesUsed( 1 );
     ASSERT_FALSE( buff.IsEmpty() );
     ASSERT_EQ( 1, buff.GetBytesUsed() );
 
     // set the "bytes used" value to the maximum possible
-    ASSERT_TRUE( buff.SetBytesUsed( BUILTIN_BUFF_SIZE ) );
+    buff.SetBytesUsed( BUILTIN_BUFF_SIZE );
     ASSERT_FALSE( buff.IsEmpty() );
     ASSERT_EQ( BUILTIN_BUFF_SIZE, buff.GetBytesUsed() );
 
     // ensure we can lower the "bytes used" value
-    ASSERT_TRUE( buff.SetBytesUsed( BUILTIN_BUFF_SIZE - 1 ) );
-    ASSERT_FALSE( buff.IsEmpty() );
-    ASSERT_EQ( BUILTIN_BUFF_SIZE - 1, buff.GetBytesUsed() );
-
-    // try setting the "bytes used" value to something larger than the
-    // current buffer size; bytes used should remain unchanged
-    ASSERT_FALSE( buff.SetBytesUsed( BUILTIN_BUFF_SIZE + 1 ) );
+    buff.SetBytesUsed( BUILTIN_BUFF_SIZE - 1 );
     ASSERT_FALSE( buff.IsEmpty() );
     ASSERT_EQ( BUILTIN_BUFF_SIZE - 1, buff.GetBytesUsed() );
 
     // enlarge the buffer and ensure we can set "bytes used" to the larger value
     ASSERT_TRUE( buff.EnsureSize( BUILTIN_BUFF_SIZE + 1 ) );
-    ASSERT_TRUE( buff.SetBytesUsed( BUILTIN_BUFF_SIZE + 1 ) );
+    buff.SetBytesUsed( BUILTIN_BUFF_SIZE + 1 );
     ASSERT_FALSE( buff.IsEmpty() );
     ASSERT_EQ( BUILTIN_BUFF_SIZE + 1, buff.GetBytesUsed() );
+}
+
+TEST(Buffer, BytesUsedErrorTest)
+{
+    const size_t BUILTIN_BUFF_SIZE = 100;
+    Buffer<BUILTIN_BUFF_SIZE> buff;
+
+    // try setting the "bytes used" value to something larger than the
+    // current buffer size
+    ASSERT_THROW( buff.SetBytesUsed( BUILTIN_BUFF_SIZE + 1 ), std::logic_error );
 }
 
 TEST(Buffer, AssignTest)
@@ -181,7 +243,7 @@ TEST(Buffer, AssignTest)
     ASSERT_EQ( 0, ::strcmp( buff.GetCharBuffer(), dataStr.c_str() ) );
 
     // first try a slice the same size as the string
-    basho::utils::Slice dataSlice1( dataBuff, dataStr.size() + 1 );
+    Slice dataSlice1( dataBuff, dataStr.size() + 1 );
     ASSERT_TRUE( buff.Assign( dataSlice1 ) );
     ASSERT_EQ( dataStr.size() + 1, buff.GetBytesUsed() );
     const char* pBuff = buff.GetCharBuffer();
@@ -191,7 +253,7 @@ TEST(Buffer, AssignTest)
     }
 
     // now try the full buffer
-    basho::utils::Slice dataSlice2( dataBuff, sizeof dataBuff );
+    Slice dataSlice2( dataBuff, sizeof dataBuff );
     ASSERT_TRUE( buff.Assign( dataSlice2 ) );
     ASSERT_EQ( sizeof dataBuff, buff.GetBytesUsed() );
     pBuff = buff.GetCharBuffer();
@@ -199,4 +261,50 @@ TEST(Buffer, AssignTest)
     {
         ASSERT_EQ( (char)j, pBuff[j] );
     }
+}
+
+TEST(Buffer, Compare)
+{
+    char dataBuff[ 1000 ];
+    int j;
+    for ( j = 0; j < sizeof dataBuff; ++j )
+    {
+        dataBuff[j] = (char)j;
+    }
+
+    // now create a Buffer, assign some data to it, and check the contents
+    const size_t BUILTIN_BUFF_SIZE = 100;
+    Buffer<BUILTIN_BUFF_SIZE> buff;
+    buff.Assign( dataBuff, BUILTIN_BUFF_SIZE );
+    ASSERT_EQ( 0, buff.Compare( dataBuff, BUILTIN_BUFF_SIZE ) );
+
+    // now check specifying different buffer sizes for dataBuff (if dataBuff
+    // has more data than buff, then buff < dataBuff)
+    ASSERT_EQ( -1, buff.Compare( dataBuff, BUILTIN_BUFF_SIZE + 1 ) );
+    ASSERT_EQ(  1, buff.Compare( dataBuff, BUILTIN_BUFF_SIZE - 1 ) );
+
+    // now alter the data in dataBuff and ensure we get the expected comparison results
+    ASSERT_EQ(  0, buff.Compare( dataBuff, BUILTIN_BUFF_SIZE ) );
+    dataBuff[42] += 1;
+    ASSERT_EQ( -1, buff.Compare( dataBuff, BUILTIN_BUFF_SIZE ) );
+    dataBuff[41] -= 1;
+    ASSERT_EQ(  1, buff.Compare( dataBuff, BUILTIN_BUFF_SIZE ) );
+
+    // put dataBuff back to its original state
+    dataBuff[41] += 1;
+    dataBuff[42] -= 1;
+
+    // create some Slice objects from dataBuff and compare
+    Slice sliceEQ( dataBuff, BUILTIN_BUFF_SIZE );
+    Slice sliceLT( dataBuff, BUILTIN_BUFF_SIZE - 1 );
+    Slice sliceGT( dataBuff, BUILTIN_BUFF_SIZE + 1 );
+
+    ASSERT_EQ(  0, buff.Compare( sliceEQ ) );
+    ASSERT_EQ( -1, buff.Compare( sliceGT ) );
+    ASSERT_EQ(  1, buff.Compare( sliceLT ) );
+
+    // try with operator==
+    ASSERT_TRUE( buff == sliceEQ );
+    ASSERT_TRUE( buff != sliceLT );
+    ASSERT_TRUE( buff != sliceGT );
 }

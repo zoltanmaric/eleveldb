@@ -8,6 +8,38 @@
 namespace basho {
 namespace bigset {
 
+bool Actor::IsClear() const
+{
+    for ( int j = 0; j < sizeof m_ID; ++j )
+    {
+        if ( m_ID[j] != 0 )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+int Actor::Compare( const char* pData, size_t SizeInBytes ) const
+{
+    if ( SizeInBytes < sizeof m_ID )
+    {
+        throw std::logic_error( "SizeInBytes value is too small to be an Actor ID" );
+    }
+
+    int retVal = ::memcmp( m_ID, pData, sizeof m_ID );
+    if ( retVal < 0 )
+    {
+        // memcmp() only promises < 0, but we want -1
+        retVal = -1;
+    }
+    else if ( retVal > 0 )
+    {
+        retVal = 1;
+    }
+    return retVal;
+}
+
 std::string Actor::ToString() const
 {
     std::stringstream actorStr;
@@ -95,15 +127,15 @@ BigsetClock::ToString() const
 //
 bool // returns true if the binary value was successfully converted to a BigsetClock, else returns false
 BigsetClock::ValueToBigsetClock(
-    const utils::Slice& Value,   // IN:  serialized bigset clock
-    BigsetClock&        Clock,   // OUT: receives the parsed bigset clock
-    std::string&        Error )  // OUT: if false returned, contains a description of the error
+    const Slice&  Value,   // IN:  serialized bigset clock
+    BigsetClock&  Clock,   // OUT: receives the parsed bigset clock
+    std::string&  Error )  // OUT: if false returned, contains a description of the error
 {
     // initialize the caller's output parameters
     Clock.Clear();
     Error.clear();
 
-    // TODO: all the hard-coded stuff below needs to be replaced with calls into the Erlang ei library
+    // TODO: all the hard-coded stuff below (probably) needs to be replaced with calls into the Erlang ei library
 
     // the following hacked code is based on the Erlang External Term Format
     // specified at http://erlang.org/doc/apps/erts/erl_ext_dist.html

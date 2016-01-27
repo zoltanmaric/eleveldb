@@ -21,14 +21,14 @@ class BigsetKey
     };
 
     KeyType  m_KeyType;
-    ErlTerm  m_SetName;
-    ErlTerm  m_Element;
-    ErlTerm  m_Actor;
+    Slice    m_SetName;
+    Slice    m_Element;
+    Slice    m_Actor;
     uint64_t m_Counter;
     bool     m_IsTombstone;
 
 public:
-    BigsetKey( ErlTerm key );
+    BigsetKey( Slice key );
 
     bool IsClock() const { return KeyTypeClock == m_KeyType; }
 
@@ -38,13 +38,13 @@ public:
 
     bool IsValid() const { return KeyTypeInvalid != m_KeyType; }
 
-    const ErlTerm& GetSetName() const { return m_SetName; }
+    const Slice& GetSetName() const { return m_SetName; }
 
-    const ErlTerm& GetActor() const { return m_Actor; }
+    const Slice& GetActor() const { return m_Actor; }
 
-    const ErlTerm& GetElement() const { return m_Element; }
+    const Slice& GetElement() const { return m_Element; }
 
-    ErlCounter GetCounter() const { return m_Counter; }
+    uint64_t GetCounter() const { return m_Counter; }
 
     bool GetTombstone() const { return m_IsTombstone; }
 };

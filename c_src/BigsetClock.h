@@ -5,16 +5,15 @@
 #ifndef BASHO_BIGSET_CLOCK_H
 #define BASHO_BIGSET_CLOCK_H
 
-#include "util/slice.h"
 #include "CrdtUtils.h"
+
+#include <stdexcept>
+#include <leveldb/slice.h>
 
 namespace basho {
 namespace bigset {
 
-typedef utils::Slice ErlTerm;
-typedef uint32_t     ErlCounter;
-
-typedef utils::Slice       Slice;
+typedef leveldb::Slice     Slice;
 typedef uint64_t           Counter;
 typedef std::list<Counter> CounterList;
 
@@ -24,24 +23,75 @@ class Actor
     char m_ID[8];
 
 public:
-    Actor() { Clear(); }
-    Actor( const Actor& That ) { ::memcpy( m_ID, That.m_ID, sizeof m_ID ); }
-    Actor& operator=( const Actor& That ) { ::memcpy( m_ID, That.m_ID, sizeof m_ID ); return *this; }
-
-    void Clear() { ::memset( m_ID, 0, sizeof m_ID ); }
-
-    bool SetId( Slice& Data )
+    // ctors and assignment operator
+    Actor()
     {
-        if ( Data.size() < sizeof m_ID )
+        Clear();
+    }
+
+    Actor( const Actor& That )
+    {
+        ::memcpy( m_ID, That.m_ID, sizeof m_ID );
+    }
+
+    Actor& operator=( const Actor& That )
+    {
+        if ( this != &That )
+        {
+            ::memcpy( m_ID, That.m_ID, sizeof m_ID );
+        }
+        return *this;
+    }
+
+    ///////////////////////////////////
+    // Assignment Methods
+    bool SetId( const char* pData, size_t SizeInBytes )
+    {
+        if ( SizeInBytes < sizeof m_ID )
         {
             return false;
         }
-        ::memcpy( m_ID, Data.data(), sizeof m_ID );
-        Data.remove_prefix( sizeof m_ID );
+        ::memcpy( m_ID, pData, sizeof m_ID );
         return true;
     }
 
-    // return the Actor as a string, in Erlang term format
+    bool SetId( const Slice& Data )
+    {
+        return SetId( Data.data(), Data.size() );
+    }
+
+    bool SetId( Slice& Data )
+    {
+        bool retVal = SetId( Data.data(), Data.size() );
+        if ( retVal )
+        {
+            Data.remove_prefix( sizeof m_ID );
+        }
+        return retVal;
+    }
+
+    // clears the ID of this actor
+    void Clear() { ::memset( m_ID, 0, sizeof m_ID ); }
+
+    // returns whether or not the ID for this actor is clear (all zeroes)
+    bool IsClear() const;
+
+    ///////////////////////////////////
+    // Comparison Methods
+    //
+    // NOTE: if the caller passes a buffer that's not at least sizeof(m_ID)
+    // bytes, throws a std::logic_error exception
+    int Compare( const char* pData, size_t SizeInBytes ) const;
+
+    int Compare( const Slice& Data ) const
+    {
+        return Compare( Data.data(), Data.size() );
+    }
+
+    bool operator==( const Slice& Data ) const { return 0 == Compare( Data ); }
+    bool operator!=( const Slice& Data ) const { return 0 != Compare( Data ); }
+
+    // returns the Actor as a string, in Erlang term format
     std::string
     ToString() const;
 };
@@ -82,16 +132,22 @@ public:
         m_DotCloud.push_back( DotCloudEntry( Act, Events ) );
     }
 
-    void Clear() { m_VersionVector.Clear(); m_DotCloud.clear(); }
+    void Clear()
+    {
+        m_VersionVector.Clear();
+        m_DotCloud.clear();
+    }
 
     void
     Merge( const BigsetClock& /*clock*/ )
     {
+        // TODO: fill in details for Dots::Join()
     }
 
     Dots
     SubtractSeen( const Dots& /*dots*/ )
     {
+        // TODO: fill in details: look at erlang code
         return Dots();
     }
 
@@ -104,9 +160,9 @@ public:
     // creating a BigsetClock object
     static bool // returns true if the binary value was successfully converted to a BigsetClock, else returns false
     ValueToBigsetClock(
-        const utils::Slice& Value,   // IN:  serialized bigset clock
-        BigsetClock&        Clock,   // OUT: receives the parsed bigset clock
-        std::string&        Error ); // OUT: if false returned, contains a description of the error
+        const Slice&  Value,   // IN:  serialized bigset clock
+        BigsetClock&  Clock,   // OUT: receives the parsed bigset clock
+        std::string&  Error ); // OUT: if false returned, contains a description of the error
 
 private:
     // helper methods used by ValueToBigsetClock()

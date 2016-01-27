@@ -12,8 +12,7 @@ add_library(gtest_all STATIC ${GTEST_DIR}/src/gtest-all.cc)
 add_library(gtest_main STATIC ${GTEST_DIR}/src/gtest_main.cc)
 
 set(SOURCE_FILES
-    buffer.h
-    slice.h)
+    buffer.h)
 
 #add_library(BashoUtils STATIC ${SOURCE_FILES})
 

@@ -103,7 +103,7 @@ int main( int argc, char** argv )
     // validate command line input
     if ( argc < 2 )
     {
-        printf( "USAGE: bigsetClockTest <BigsetClockFile>\n" );
+        printf( "USAGE: bigsetClockValidationTool <BigsetClockFile>\n" );
         return 1;
     }
 
@@ -157,7 +157,7 @@ int main( int argc, char** argv )
         printf( "       : %zd bytes\n", binaryByteCount );
 
         // now create a BigsetClock object from the byte stream
-        basho::utils::Slice binaryValue( binaryBuff.GetCharBuffer(), binaryByteCount );
+        Slice binaryValue( binaryBuff.GetCharBuffer(), binaryByteCount );
         basho::bigset::BigsetClock bigsetClock;
         std::string errStr;
         if ( !basho::bigset::BigsetClock::ValueToBigsetClock( binaryValue, bigsetClock, errStr ) )

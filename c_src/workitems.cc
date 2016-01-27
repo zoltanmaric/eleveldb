@@ -1047,12 +1047,12 @@ work_result RangeScanTask::operator()()
             // may have multiple records per element in the set)
             bigset_acc_->AddRecord( key, value );
 
-            filter_passed = bigset_acc_->recordReady();
+            filter_passed = bigset_acc_->RecordReady();
             if ( filter_passed )
             {
                 // we have finished accumulating the current element,
                 // so add it to the output buffer
-                bigset_acc_->getCurrentElement( key, value );
+                bigset_acc_->GetCurrentElement( key, value );
             }
         }
         
@@ -1122,12 +1122,6 @@ work_result RangeScanTask::operator()()
 	    }
 
         iter->Next();
-    }
-
-    // do we have a partially accumulated bigset record?
-    if ( options_.isBigset_ )
-    {
-
     }
 
     //------------------------------------------------------------

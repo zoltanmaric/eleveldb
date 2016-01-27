@@ -100,31 +100,31 @@ namespace bigset {
 namespace internal {
 
 // key decoding helpers taken from leveldb/util/comparator.cc
-static leveldb::Slice Get32PrefData( leveldb::Slice& s )
+static Slice Get32PrefData( Slice& s )
 {
-    uint32_t       actual = DecodeFixed32( s.data() );
-    leveldb::Slice res    = leveldb::Slice( s.data() + 4, actual );
+    uint32_t actual = DecodeFixed32( s.data() );
+    Slice    res    = Slice( s.data() + 4, actual );
     s.remove_prefix( 4 + actual );
     return res;
 }
 
-static uint64_t GetCounter( leveldb::Slice& s )
+static uint64_t GetCounter( Slice& s )
 {
     uint64_t actual = DecodeFixed64( s.data() );
     s.remove_prefix( 8 );
     return actual;
 }
 
-static leveldb::Slice GetTsb( leveldb::Slice& s )
+static Slice GetTsb( Slice& s )
 {
-    leveldb::Slice res = leveldb::Slice( s.data(), 1 ); // one byte a or r
+    Slice res = Slice( s.data(), 1 ); // one byte a or r
     s.remove_prefix( 1 );
     return res;
 }
 
-static leveldb::Slice GetKeyType( leveldb::Slice& s )
+static Slice GetKeyType( Slice& s )
 {
-    leveldb::Slice res = leveldb::Slice( s.data(), 1 ); // one byte c, e, or z
+    Slice res = Slice( s.data(), 1 ); // one byte c, e, or z
     s.remove_prefix( 1 );
     return res;
 }
@@ -160,10 +160,10 @@ static leveldb::Slice GetKeyType( leveldb::Slice& s )
 //    SetName:SetNameLen/binary, %% Set name for bytewise comparison
 //    $z, %% means end key, used for limiting streaming fold
 //    >>
-BigsetKey::BigsetKey( ErlTerm key )
+BigsetKey::BigsetKey( Slice key )
 {
-    m_SetName              = internal::Get32PrefData( key );
-    leveldb::Slice keyType = internal::GetKeyType( key );
+    m_SetName     = internal::Get32PrefData( key );
+    Slice keyType = internal::GetKeyType( key );
     switch ( keyType[0] )
     {
         case 'c':
