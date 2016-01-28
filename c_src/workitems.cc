@@ -617,6 +617,7 @@ RangeScanOptions::RangeScanOptions() :
     fill_cache(false), 
     verify_checksums(true),
     isBigset_(false),
+    isBigsetActorSet_(false),
     encodingType_(Encoding::NONE),
     env_(0),
     useRangeFilter_(false) {};
@@ -818,7 +819,10 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
     }
 
     if(options_.isBigset_) {
-      bigset_acc_.reset( new basho::bigset::BigsetAccumulator() );
+        if (!options.isBigsetActorSet_) {
+            ThrowRuntimeError("Bigsets flag is set but no actor ID was specified");
+        }
+        bigset_acc_.reset( new basho::bigset::BigsetAccumulator( options_.bigsetActor_ ) );
     }
     
     if(!sync_obj_) {

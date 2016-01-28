@@ -39,22 +39,11 @@ void basho::bigset::BigsetAccumulator::AddRecord( Slice key, Slice value )
         if ( keyToAdd.IsClock() )
         {
             // we have a clock key; see if it's for the actor we're tracking; if not, we ignore this clock
-            const Slice& actor( keyToAdd.GetActor() );
-            // TODO: the actor needs to be specified by the user doing the fold
-            if ( m_ThisActor.IsClear() )
-            {
-                // this is the first clock key we've seen for this bigset, so save its associated actor
-                m_ThisActor.SetId( actor );
-            }
-            else if ( m_ThisActor == actor )
+            if ( m_ThisActor == keyToAdd.GetActor() )
             {
                 // get the clock value for this actor
 
                 // TODO: return the key/value for this actor as-is as a record in the fold
-            }
-            else
-            {
-                // ignore this actor; it's not the one we care about
             }
         }
         else if ( keyToAdd.IsElement() )

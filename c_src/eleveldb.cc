@@ -492,9 +492,9 @@ ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Optio
         }
         else if (option[0] == eleveldb::ATOM_BIGSETS)
         {
-          if (option[1] == eleveldb::ATOM_TRUE)
+            if (option[1] == eleveldb::ATOM_TRUE)
             {
-              opts.comparator = leveldb::GetBSComparator();
+                opts.comparator = leveldb::GetBSComparator();
             }
         }
     }
@@ -572,6 +572,21 @@ ERL_NIF_TERM parse_streaming_option(ErlNifEnv* env, ERL_NIF_TERM item,
             opts.useRangeFilter_  = true;
             opts.env_             = env;
             opts.rangeFilterSpec_ = option[1];
+        } else if (option[0] == eleveldb::ATOM_BIGSETS) {
+            opts.isBigset_ = (option[1] == eleveldb::ATOM_TRUE);
+        } else if (option[0] == eleveldb::ATOM_VNODE) {
+            ErlNifBinary actorId;
+            if (!enif_inspect_binary(env, option[1], &actorId)) {
+                // TODO: log an error message
+                return eleveldb::ATOM_BADARG;
+            }
+
+            opts.isBigsetActorSet_ = opts.bigsetActor_.SetId( (const char*)actorId.data,
+                                                              actorId.size );
+            if ( !opts.isBigsetActorSet_ ) {
+                // TODO: log an error message
+                return eleveldb::ATOM_BADARG;
+            }
         }
     }
 

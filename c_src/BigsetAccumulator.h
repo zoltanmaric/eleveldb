@@ -31,7 +31,7 @@ private:
     void FinalizeElement();
 
 public:
-    BigsetAccumulator() : m_RecordReady( false )
+    BigsetAccumulator( const Actor& ThisActor ) : m_ThisActor( ThisActor ), m_RecordReady( false )
     { }
 
     ~BigsetAccumulator() { }

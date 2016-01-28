@@ -375,7 +375,9 @@ struct RangeScanOptions {
 
     // Record type options
 
+    basho::bigset::Actor bigsetActor_;
     bool isBigset_;
+    bool isBigsetActorSet_;
     
     // Filter options
 
