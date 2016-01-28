@@ -26,12 +26,15 @@ private:
 
     Buffer      m_ReadyKey;
     Buffer      m_ReadyValue;
-    bool        m_RecordReady;
+    bool        m_ElementReady;
+    bool        m_ActorClockReady;
 
     void FinalizeElement();
 
 public:
-    BigsetAccumulator( const Actor& ThisActor ) : m_ThisActor( ThisActor ), m_RecordReady( false )
+    BigsetAccumulator( const Actor& ThisActor ) : m_ThisActor( ThisActor ),
+                                                  m_ElementReady( false ),
+                                                  m_ActorClockReady( false )
     { }
 
     ~BigsetAccumulator() { }
@@ -41,13 +44,13 @@ public:
     bool
     RecordReady()
     {
-        return m_RecordReady;
+        return m_ElementReady || m_ActorClockReady;
     }
 
     void
     GetCurrentElement( Slice& key, Slice& value )
     {
-        if ( m_RecordReady )
+        if ( m_ElementReady )
         {
             Slice readyKey( m_ReadyKey.GetCharBuffer(), m_ReadyKey.GetBuffSize() );
             key = readyKey;
@@ -55,7 +58,12 @@ public:
             Slice readyValue( m_ReadyValue.GetCharBuffer(), m_ReadyValue.GetBuffSize() );
             value = readyValue;
 
-            m_RecordReady = false; // prepare for the next record
+            m_ElementReady = false; // prepare for the next element
+        }
+        else if ( m_ActorClockReady )
+        {
+            // we send the key/value back to the caller as-is
+            m_ActorClockReady = false;
         }
     }
 };

@@ -12,7 +12,7 @@ void BigsetAccumulator::FinalizeElement()
         // this element is "in" the set locally
         m_ReadyKey    = m_CurrentElement; // TODO: transfer the buffer if possible
         //m_ReadyValue  = remainingDots.ToValue(); // TODO: format is term_to_binary() formatted list of 2-tuples {actor,integer}
-        m_RecordReady = true;
+        m_ElementReady = true;
 
         m_CurrentContext.Clear();
         m_CurrentDots.Clear();
@@ -41,9 +41,7 @@ void basho::bigset::BigsetAccumulator::AddRecord( Slice key, Slice value )
             // we have a clock key; see if it's for the actor we're tracking; if not, we ignore this clock
             if ( m_ThisActor == keyToAdd.GetActor() )
             {
-                // get the clock value for this actor
-
-                // TODO: return the key/value for this actor as-is as a record in the fold
+                m_ActorClockReady = true;
             }
         }
         else if ( keyToAdd.IsElement() )
