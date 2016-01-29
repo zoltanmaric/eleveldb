@@ -28,18 +28,24 @@ private:
     Buffer      m_ReadyValue;
     bool        m_ElementReady;
     bool        m_ActorClockReady;
+    bool        m_ActorClockSeen;
 
     void FinalizeElement();
 
 public:
     BigsetAccumulator( const Actor& ThisActor ) : m_ThisActor( ThisActor ),
                                                   m_ElementReady( false ),
-                                                  m_ActorClockReady( false )
+                                                  m_ActorClockReady( false ),
+                                                  m_ActorClockSeen( false )
     { }
 
     ~BigsetAccumulator() { }
 
-    void AddRecord( Slice key, Slice value );
+    // adds the current record to the accumulator
+    //
+    // NOTE: throws a std::runtime_error if an error occurs
+    bool // true => record processed; false => encountered an element record but have not seen a clock for the specified actor
+    AddRecord( Slice key, Slice value );
 
     bool
     RecordReady()

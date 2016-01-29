@@ -861,15 +861,20 @@ void RangeScanTask::sendMsg(ErlNifEnv * msg_env, ERL_NIF_TERM atom, ErlNifPid pi
     }
 }
 
-void RangeScanTask::sendMsg(ErlNifEnv * msg_env, ERL_NIF_TERM atom, ErlNifPid pid, std::string msg)
+void RangeScanTask::sendMsg(ErlNifEnv * msg_env, ERL_NIF_TERM atom, ErlNifPid pid, const char* errMsg)
 {
     if(!sync_obj_->IsConsumerDead()) {
         ERL_NIF_TERM ref_copy = enif_make_copy(msg_env, caller_ref_term);
-	ERL_NIF_TERM msg_str  = enif_make_string(msg_env, msg.c_str(), ERL_NIF_LATIN1);
+        ERL_NIF_TERM msg_str  = enif_make_string(msg_env, errMsg, ERL_NIF_LATIN1);
         ERL_NIF_TERM msg      = enif_make_tuple3(msg_env, atom, ref_copy, msg_str);
         
         enif_send(NULL, &pid, msg_env, msg);
     }
+}
+
+void RangeScanTask::sendMsg(ErlNifEnv * msg_env, ERL_NIF_TERM atom, ErlNifPid pid, const std::string& errMsg)
+{
+    return sendMsg(msg_env, atom, pid, errMsg.c_str());
 }
 
 void RangeScanTask::send_streaming_batch(ErlNifPid * pid, ErlNifEnv * msg_env, ERL_NIF_TERM ref_term,
@@ -907,6 +912,28 @@ char* RangeScanTask::EncodeVarint64(char* dst, uint64_t v)
     return reinterpret_cast<char*>(ptr);
 }
 
+// helper class that encapsulates an ErlNifEnv object allocated via
+// enif_alloc_env(), freeing the object in the dtor
+class ErlNifEnvFreeHelper
+{
+    ErlNifEnv* m_pEnv;
+
+    // copy ctor and assignment operator hidden
+    ErlNifEnvFreeHelper( const ErlNifEnvFreeHelper& );
+    ErlNifEnvFreeHelper& operator=( const ErlNifEnvFreeHelper& );
+
+public:
+    ErlNifEnvFreeHelper( ErlNifEnv* pEnv ) : m_pEnv( pEnv ) {}
+    ~ErlNifEnvFreeHelper()
+    {
+        if ( NULL != m_pEnv )
+        {
+            enif_free_env( m_pEnv );
+            m_pEnv = NULL;
+        }
+    }
+};
+
 /**.......................................................................
  * Perform range-scan work, with optional filtering
  */
@@ -914,6 +941,7 @@ work_result RangeScanTask::operator()()
 {
     ErlNifEnv* env     = local_env_;
     ErlNifEnv* msg_env = enif_alloc_env();
+    ErlNifEnvFreeHelper msgEnvFreeHelper( msg_env ); // ensure we free this
 
     leveldb::ReadOptions read_options;
 
@@ -1049,7 +1077,19 @@ work_result RangeScanTask::operator()()
         {
             // we are processing a bigset, so accumulate per-element (we
             // may have multiple records per element in the set)
-            bigset_acc_->AddRecord( key, value );
+            try
+            {
+                if ( !bigset_acc_->AddRecord( key, value ) )
+                {
+                    // TODO: we didn't find a clock for the specified actor, so return "not found" (or maybe just break out of the loop?)
+                }
+            }
+            catch ( std::runtime_error& ex )
+            {
+                // TODO: ensure this is the correct handling of an error
+                sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, ex.what() );
+                return work_result(local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR);
+            }
 
             filter_passed = bigset_acc_->RecordReady();
             if ( filter_passed )
@@ -1137,8 +1177,6 @@ work_result RangeScanTask::operator()()
 
     if(out_offset)
         enif_release_binary(&bin);
-
-    enif_free_env(msg_env);
 
     return work_result();
 

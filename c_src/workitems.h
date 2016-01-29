@@ -472,7 +472,8 @@ public:
     static void SyncHandleResourceCleanup(ErlNifEnv* env, void* arg);
     
     void sendMsg(ErlNifEnv* msg_env, ERL_NIF_TERM atom, ErlNifPid pid);
-    void sendMsg(ErlNifEnv* msg_env, ERL_NIF_TERM atom, ErlNifPid pid, std::string msg);
+    void sendMsg(ErlNifEnv* msg_env, ERL_NIF_TERM atom, ErlNifPid pid, const char* errMsg);
+    void sendMsg(ErlNifEnv* msg_env, ERL_NIF_TERM atom, ErlNifPid pid, const std::string& errMsg);
 
     int VarintLength(uint64_t v);    
     char* EncodeVarint64(char* dst, uint64_t v);

@@ -4,7 +4,8 @@
 namespace basho {
 namespace bigset {
 
-void BigsetAccumulator::FinalizeElement()
+void
+BigsetAccumulator::FinalizeElement()
 {
     Dots remainingDots = m_CurrentContext.SubtractSeen( m_CurrentDots );
     if ( !remainingDots.IsEmpty() )
@@ -19,7 +20,11 @@ void BigsetAccumulator::FinalizeElement()
     }
 }
 
-void basho::bigset::BigsetAccumulator::AddRecord( Slice key, Slice value )
+// adds the current record to the accumulator
+//
+// NOTE: throws a std::runtime_error if an error occurs
+bool // true => record processed; false => encountered an element record but have not seen a clock for the specified actor
+BigsetAccumulator::AddRecord( Slice key, Slice value )
 {
     BigsetKey keyToAdd( key );
     if ( keyToAdd.IsValid() )
@@ -33,7 +38,9 @@ void basho::bigset::BigsetAccumulator::AddRecord( Slice key, Slice value )
         else if ( m_CurrentSetName != setName )
         {
             // this is unexpected; we didn't hit an "end" key for the bigset
-            // TODO: handle unexpected set name change
+
+            // TODO: log an error and handle unexpected set name change
+            throw std::runtime_error( "Unexpected set name change" );
         }
 
         if ( keyToAdd.IsClock() )
@@ -41,33 +48,54 @@ void basho::bigset::BigsetAccumulator::AddRecord( Slice key, Slice value )
             // we have a clock key; see if it's for the actor we're tracking; if not, we ignore this clock
             if ( m_ThisActor == keyToAdd.GetActor() )
             {
+                if ( m_ActorClockSeen )
+                {
+                    // we should only see one clock for a given actor
+
+                    // TODO: log an error about the unexpected second instance of a clock for this actor
+                    throw std::runtime_error( "Unexpected second clock found for actor" );
+                }
                 m_ActorClockReady = true;
+                m_ActorClockSeen = true;
             }
         }
         else if ( keyToAdd.IsElement() )
         {
+            // ensure we've seen the clock for the desired actor
+            if ( !m_ActorClockSeen )
+            {
+                // TODO: log a message that we did not see a clock for the specified actor; the erlang code treats this condition as "not found"
+                return false;
+            }
+
             // we have an element key; see if it's for the current element we're processing
-            if ( !m_CurrentElement.IsEmpty() && m_CurrentElement != keyToAdd.GetElement() )
+            const Slice& element( keyToAdd.GetElement() );
+            if ( !m_CurrentElement.IsEmpty() && m_CurrentElement != element )
             {
                 // we are starting a new element, so finish processing of the previous element
                 FinalizeElement();
             }
 
             // accumulate values
-            m_CurrentElement.Assign( keyToAdd.GetElement() );
+            if ( m_CurrentElement.IsEmpty() )
+            {
+                m_CurrentElement.Assign( element );
+            }
 
             BigsetClock currentClock;
             std::string error;
             if ( !BigsetClock::ValueToBigsetClock( value, currentClock, error ) )
             {
-                // TODO: handle error converting value to a bigset clock
+                // TODO: log an error about converting value to a bigset clock
+                throw std::runtime_error( "Unable to convert binary to bigset clock" );
             }
             m_CurrentContext.Merge( currentClock );
 
             Actor actor;
             if ( !actor.SetId( keyToAdd.GetActor() ) )
             {
-                // TODO: handle error creating an Actor object
+                // TODO: log an error about creating an Actor object
+                throw std::runtime_error( "Unable to set actor ID" );
             }
             m_CurrentDots.AddDot( actor,
                                   keyToAdd.GetCounter(),
@@ -82,13 +110,16 @@ void basho::bigset::BigsetAccumulator::AddRecord( Slice key, Slice value )
         else
         {
             // oops, we weren't expecting this
-            // TODO: handle unexpected element type
+            // TODO: log an error and handle unexpected key type
+            throw std::runtime_error( "Unexpected key type" );
         }
     }
     else
     {
-        // TODO: handle invalid element
+        // TODO: log an error and handle invalid key
+        throw std::runtime_error( "Unable to parse key" );
     }
+    return true;
 }
 
 } // namespace bigset
