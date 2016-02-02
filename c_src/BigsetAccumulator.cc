@@ -7,7 +7,7 @@ namespace bigset {
 void
 BigsetAccumulator::FinalizeElement()
 {
-    Dots remainingDots = m_CurrentContext.SubtractSeen( m_CurrentDots );
+    VersionVector remainingDots = m_CurrentContext.SubtractSeen( m_CurrentDots );
     if ( !remainingDots.IsEmpty() )
     {
         // this element is "in" the set locally

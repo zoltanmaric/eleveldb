@@ -16,23 +16,11 @@ namespace bigset {
 /////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////
 
-bool Actor::IsClear() const
-{
-    for ( int j = 0; j < sizeof m_ID; ++j )
-    {
-        if ( m_ID[j] != 0 )
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 int Actor::Compare( const char* pData, size_t SizeInBytes ) const
 {
     if ( SizeInBytes < sizeof m_ID )
     {
-        throw std::logic_error( "SizeInBytes value is too small to be an Actor ID" );
+        throw std::invalid_argument( "SizeInBytes value is too small to be an Actor ID" );
     }
 
     int retVal = ::memcmp( m_ID, pData, sizeof m_ID );
@@ -79,7 +67,7 @@ BigsetClock::ToString() const
     bigsetClockStr << "{[";
 
     int j = 0;
-    const std::list<Dot>& vv( m_VersionVector.GetDots() );
+    auto vv( m_VersionVector.GetDots() );
     for ( auto vvIt = vv.begin(); vvIt != vv.end(); ++vvIt )
     {
         if ( j++ > 0 )
@@ -87,16 +75,17 @@ BigsetClock::ToString() const
             bigsetClockStr << ',';
         }
         bigsetClockStr << '{';
-        bigsetClockStr << (*vvIt).first.ToString();
+        bigsetClockStr << (*vvIt).GetActor().ToString();
         bigsetClockStr << ',';
-        bigsetClockStr << (*vvIt).second;
+        bigsetClockStr << (*vvIt).GetCounter();
         bigsetClockStr << '}';
     }
 
     bigsetClockStr << "],[";
 
     j = 0;
-    for ( auto dcIt = m_DotCloud.begin(); dcIt != m_DotCloud.end(); ++dcIt )
+    auto dotCloud( m_DotCloud.GetDots() );
+    for ( auto dcIt = dotCloud.begin(); dcIt != dotCloud.end(); ++dcIt )
     {
         if ( j++ > 0 )
         {
@@ -107,7 +96,7 @@ BigsetClock::ToString() const
         bigsetClockStr << ",[";
 
         int k = 0;
-        const CounterList& events( (*dcIt).GetEvents() );
+        const CounterList& events( (*dcIt).GetCounter() );
         for ( auto evIt = events.begin(); evIt != events.end(); ++evIt )
         {
             if ( k++ > 0 )
@@ -262,7 +251,11 @@ BigsetClock::ProcessListOfTwoTuples(
             }
 
             // add this actor/event to the version vector
-            Clock.AddToVersionVector( actor, event );
+            if ( !Clock.AddToVersionVector( actor, event ) )
+            {
+                ProcessListOfTwoTuplesErrorMessage( Error, IsVersionVector, "error adding actor/event", j );
+                return false;
+            }
         }
         else
         {
@@ -281,7 +274,11 @@ BigsetClock::ProcessListOfTwoTuples(
             }
 
             // add this actor/event list to the dot cloud
-            Clock.AddToDotCloud( actor, events );
+            if ( !Clock.AddToDotCloud( actor, events ) )
+            {
+                ProcessListOfTwoTuplesErrorMessage( Error, IsVersionVector, "error adding actor/events", j );
+                return false;
+            }
         }
     }
 
@@ -676,5 +673,28 @@ BigsetClock::FormatUnrecognizedRecordTypeError(
     }
 }
 
+bool // true => <Act,Event> added to the version vector, else not (likely because Act is already present)
+BigsetClock::AddToVersionVector( const Actor& Act, Counter Event )
+{
+    // check if the caller's Actor is already in m_VersionVector; if so, do not re-add
+    if ( !m_AllowDuplicateActors && m_VersionVector.ContainsActor( Act ) )
+    {
+        return false;
+    }
+    m_VersionVector.AddDot( Act, Event );
+    return true;
+}
+
+bool // true => <Act, Evetns> added tot he dot cloud, else not (likely because Act is already present)
+BigsetClock::AddToDotCloud( const Actor& Act, const CounterList& Events )
+{
+    // check if the caller's Actor is already in m_VersionVector; if so, do not re-add
+    if ( !m_AllowDuplicateActors && m_DotCloud.ContainsActor( Act ) )
+    {
+        return false;
+    }
+    m_DotCloud.AddDot( Act, Events );
+    return true;
+}
 } // namespace bigset
 } // namespace basho

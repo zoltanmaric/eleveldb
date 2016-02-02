@@ -34,6 +34,17 @@ public:
         ::memcpy( m_ID, That.m_ID, sizeof m_ID );
     }
 
+    // use this ctor with care; if the Slice does not contain enough data, it throws an exception
+    Actor( const Slice& Data )
+    {
+        size_t bytesAvailable = Data.size();
+        if ( bytesAvailable < sizeof m_ID )
+        {
+            throw std::invalid_argument( "Not enough bytes in Slice to construct an Actor" );
+        }
+        ::memcpy( m_ID, Data.data(), sizeof m_ID );
+    }
+
     Actor& operator=( const Actor& That )
     {
         if ( this != &That )
@@ -55,11 +66,13 @@ public:
         return true;
     }
 
+    // sets this Actor object's ID from a Slice, leaving the Slice untouched
     bool SetId( const Slice& Data )
     {
         return SetId( Data.data(), Data.size() );
     }
 
+    // sets this Actor object's ID from a Slice, and advances the pointer in the Slice
     bool SetId( Slice& Data )
     {
         bool retVal = SetId( Data.data(), Data.size() );
@@ -73,20 +86,25 @@ public:
     // clears the ID of this actor
     void Clear() { ::memset( m_ID, 0, sizeof m_ID ); }
 
-    // returns whether or not the ID for this actor is clear (all zeroes)
-    bool IsClear() const;
-
     ///////////////////////////////////
     // Comparison Methods
     //
     // NOTE: if the caller passes a buffer that's not at least sizeof(m_ID)
-    // bytes, throws a std::logic_error exception
+    // bytes, throws a std::invalid_argument exception
     int Compare( const char* pData, size_t SizeInBytes ) const;
+
+    int Compare( const Actor& Act ) const
+    {
+        return Compare( Act.m_ID, sizeof Act.m_ID );
+    }
 
     int Compare( const Slice& Data ) const
     {
         return Compare( Data.data(), Data.size() );
     }
+
+    bool operator==( const Actor& Data ) const { return 0 == Compare( Data ); }
+    bool operator!=( const Actor& Data ) const { return 0 != Compare( Data ); }
 
     bool operator==( const Slice& Data ) const { return 0 == Compare( Data ); }
     bool operator!=( const Slice& Data ) const { return 0 != Compare( Data ); }
@@ -96,46 +114,31 @@ public:
     ToString() const;
 };
 
-// DotCloudEntry class: is an actor together with a list of non-contiguous events observed for the actor
-class DotCloudEntry
+typedef basho::crdtUtils::DotContainer<Actor, Counter>     VersionVector;
+typedef basho::crdtUtils::DotContainer<Actor, CounterList> DotCloud;
+
+class BigsetClock
 {
-    Actor       m_Actor;
-    CounterList m_Events;
+    VersionVector m_VersionVector;
+    DotCloud      m_DotCloud;
+    bool          m_AllowDuplicateActors;
 
 public:
-    DotCloudEntry( const Actor& Actor, const CounterList& Events ) : m_Actor( Actor ), m_Events( Events ) {}
+    BigsetClock( bool AllowDuplicateActors = false ) : m_AllowDuplicateActors( AllowDuplicateActors )
+    { }
 
-    // accessors
-    const Actor& GetActor() const { return m_Actor; }
-    const CounterList& GetEvents() const { return m_Events; }
-};
+//    virtual ~BigsetClock() { }
 
-typedef basho::crdtUtils::Dot<Actor, Counter>  Dot;
-typedef basho::crdtUtils::Dots<Actor, Counter> Dots;
+    bool // true => <Act,Event> added to the version vector, else not (likely because Act is already present)
+    AddToVersionVector( const Actor& Act, Counter Event );
 
-class BigsetClock //: public basho::crdtUtils::DotContext<Actor, Event>
-{
-    Dots                     m_VersionVector;
-    std::list<DotCloudEntry> m_DotCloud;
-
-public:
-    BigsetClock() { }
-    virtual ~BigsetClock() { }
-
-    void AddToVersionVector( const Actor& Act, Counter Event )
-    {
-        m_VersionVector.AddDot( Act, Event );
-    }
-
-    void AddToDotCloud( const Actor& Act, const CounterList& Events )
-    {
-        m_DotCloud.push_back( DotCloudEntry( Act, Events ) );
-    }
+    bool // true => <Act, Evetns> added tot he dot cloud, else not (likely because Act is already present)
+    AddToDotCloud( const Actor& Act, const CounterList& Events );
 
     void Clear()
     {
         m_VersionVector.Clear();
-        m_DotCloud.clear();
+        m_DotCloud.Clear();
     }
 
     void
@@ -144,11 +147,11 @@ public:
         // TODO: fill in details for Dots::Join()
     }
 
-    Dots
-    SubtractSeen( const Dots& /*dots*/ )
+    VersionVector
+    SubtractSeen( const VersionVector& /*dots*/ )
     {
         // TODO: fill in details: look at erlang code
-        return Dots();
+        return VersionVector();
     }
 
     // return the bigset clock object as a string, in Erlang term format

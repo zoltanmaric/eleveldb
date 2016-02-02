@@ -39,45 +39,48 @@ namespace basho {
 namespace crdtUtils {
 
 // template class for a Dot, which is a pair consisting of an actor of
-// type T (e.g., Slice) together with a counter of type C (e.g., uint32_t)
-template<typename T, typename C>
-class Dot : public std::pair<T, C>
+// type A together with a counter of type C
+template<typename A, typename C>
+class Dot
 {
+    A m_Actor;
+    C m_Counter;
+
 public:
-    Dot( const T& Actor, C Counter ) { this->first = Actor, this->second = Counter; }
+    Dot( const A& Actor, C Counter ) { m_Actor = Actor, m_Counter = Counter; }
 
     // accessors
-    void SetActor( const T& Actor ) { this->first = Actor; }
-    const T& GetActor() const { return this->first; }
+    void SetActor( const A& Actor ) { m_Actor = Actor; }
+    const A& GetActor() const { return m_Actor; }
 
-    void SetCounter( C Counter ) { this->second = Counter; }
-    C GetCounter() const { return this->second; }
+    void SetCounter( C Counter ) { m_Counter = Counter; }
+    C GetCounter() const { return m_Counter; }
 };
 
 // container class for Dot<> objects
-template<typename T, typename C>
-class Dots
+template<typename A, typename C>
+class DotContainer
 {
-private:
-    std::list<Dot<T, C> > m_Dots;
+    std::list< Dot<A, C> > m_Dots;
 
 public:
-    Dots() { }
+    DotContainer() { }
 
-    ~Dots() { }
+    ~DotContainer() { }
 
-    const std::list< Dot<T, C> >& GetDots() const { return m_Dots; }
+    const std::list< Dot<A, C> >& GetDots() const { return m_Dots; }
 
     void
-    AddDot( const T& Actor, C Counter, bool IsTombstone )
+    AddDot( const A& Actor, C Counter, bool IsTombstone )
     {
         if ( !IsTombstone )
         {
-            m_Dots.push_back( Dot<T, C>( Actor, Counter ) );
+            m_Dots.push_back( Dot<A, C>( Actor, Counter ) );
         }
     }
+
     void
-    AddDot( const T& Actor, C Counter )
+    AddDot( const A& Actor, C Counter )
     {
         AddDot( Actor, Counter, false );
     }
@@ -86,7 +89,18 @@ public:
 
     bool IsEmpty() const { return m_Dots.empty(); }
 
-    T ToValue() const { return T(); }
+    bool
+    ContainsActor( const A& Actor ) const
+    {
+        for ( auto it = m_Dots.begin(); it != m_Dots.end(); ++it )
+        {
+            if ( (*it).GetActor() == Actor )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 
@@ -129,8 +143,8 @@ public:
 
     bool IsDotIncluded( const Dot<T, C>& dot ) const
     {
-        const auto itm = m_CausalContext.find( dot.first );
-        if ( itm != m_CausalContext.end() && dot.second <= itm->second )
+        const auto itm = m_CausalContext.find( dot.GetActor() );
+        if ( itm != m_CausalContext.end() && dot.GetCounter() <= itm->second )
         {
             return true;
         }
@@ -148,10 +162,10 @@ public:
             flag           = false;
             for ( auto sit = m_DotCloud.begin(); sit != m_DotCloud.end(); )
             {
-                auto mit = m_CausalContext.find( sit->first );
+                auto mit = m_CausalContext.find( sit->GetActor() );
                 if ( mit == m_CausalContext.end() )
                 { // No CC entry
-                    if ( sit->second == 1 ) // Can compact
+                    if ( sit->GetCounter() == 1 ) // Can compact
                     {
                         m_CausalContext.insert( *sit );
                         m_DotCloud.erase( sit++ );
@@ -163,15 +177,15 @@ public:
                     }
                 }
                 else // there is a CC entry already
-                if ( sit->second == m_CausalContext.at( sit->first ) +
+                if ( sit->GetCounter() == m_CausalContext.at( sit->GetActor() ) +
                                     1 ) // Contiguous, can compact
                 {
-                    m_CausalContext.at( sit->first )++;
+                    m_CausalContext.at( sit->GetActor() )++;
                     m_DotCloud.erase( sit++ );
                     flag = true;
                 }
-                else if ( sit->second <=
-                          m_CausalContext.at( sit->first ) ) // dominated, so prune
+                else if ( sit->GetCounter() <=
+                          m_CausalContext.at( sit->GetActor() ) ) // dominated, so prune
                 {
                     m_DotCloud.erase( sit++ );
                     // no extra compaction opportunities so flag untouched
@@ -185,7 +199,7 @@ public:
         while ( flag );
     }
 
-    Dot<T, C> MakeDot( const T& id )
+    /*Dot<T, C> MakeDot( const T& id )
     {
         // On a valid dot generator, all dots should be compact on the used id
         // Making the new dot, updates the dot generator and returns the dot
@@ -197,7 +211,7 @@ public:
         }
         //return dot;
         return Dot<T, C>( *kib.first );
-    }
+    }*/
 
     void InsertDot( const Dot<T, C>& d, bool compactnow = true )
     {

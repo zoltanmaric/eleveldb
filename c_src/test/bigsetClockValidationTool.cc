@@ -7,6 +7,103 @@
 
 typedef basho::utils::Buffer<1024> Buffer;
 
+// local helper functions
+static std::string TrimCharacters( const std::string& Str, const std::string& CharsToTrim );
+static std::string TrimWhitespace( const std::string& Str );
+static size_t ParseBinaryString( const std::string& BinaryStr, Buffer& BinaryBuff );
+static int ProcessTermToBinaryLine( const std::string& Line, int LineNumber, bool AllowDuplicateClocks );
+
+// print the command line usage for this application and call exit()
+static void PrintUsageAndExit()
+{
+    fprintf( stderr, "USAGE: bigsetClockValidationTool [Options] [Action]\n" );
+    fprintf( stderr, "\n" );
+    fprintf( stderr, "Options: -a  Allow duplicate actors in a bigset clock\n" );
+    fprintf( stderr, "\n" );
+    fprintf( stderr, "Actions: -b<File>  Parse <File> as 'clock : term-to-binary(clock)'\n" );
+    fprintf( stderr, "         -m<File>  Parse <File> as 'clock1 : clock2 : merged-clock\n" );
+    fprintf( stderr, "\n" );
+    fprintf( stderr, "Where each clock is an erlang 2-tuple of the form {version_vector, dot_cloud}\n" );
+    fprintf( stderr, "where version_vector is a list of 2-tuples of the form\n" );
+    fprintf( stderr, "[{Actor :: binary(8), Count :: pos_integer()}] and dot_cloud is a list of\n" );
+    fprintf( stderr, "2-tuples of the form [{Actor :: binary(8), [pos_integer()]}]\n" );
+    exit( 1000 );
+}
+
+int main( int argc, char** argv )
+{
+    const char* fileName = NULL;
+    const char* description = NULL;
+    bool allowDuplicateClocks = false;
+
+    enum Action
+    {
+        None,
+        ParseBinaryClock,
+        CheckMergedClocks
+    } action = None;
+
+    // parse command line input
+    for ( int j = 1; j < argc; ++j )
+    {
+        if ( '-' == argv[j][0] )
+        {
+            switch ( argv[j][1] )
+            {
+                case 'a':
+                    allowDuplicateClocks = true;
+                    break;
+                case 'b':
+                    fileName = argv[j] + 2;
+                    description = "bigset clocks in term_to_binary format";
+                    action = ParseBinaryClock;
+                    break;
+                case 'm':
+                    fileName = argv[j] + 2;
+                    description = "merged bigset clocks";
+                    action = CheckMergedClocks;
+                    break;
+                default:
+                    PrintUsageAndExit();
+            }
+        }
+    }
+
+    // ensure we have something to do
+    if ( None == action )
+    {
+        PrintUsageAndExit();
+    }
+
+    printf( "Parsing %s in '%s'\n", description, fileName );
+    if ( allowDuplicateClocks )
+    {
+        printf( "Allowing duplicate actors in the clocks\n" );
+    }
+
+    // open the file
+    std::ifstream inputFile( fileName );
+    if ( !inputFile.is_open() )
+    {
+        printf( "Unable to open file '%s'\n", fileName );
+        return 2;
+    }
+
+    int retVal = 0;
+
+    int lineCount = 0;
+    std::string line;
+    while ( 0 == retVal && std::getline( inputFile, line ) )
+    {
+        ++lineCount;
+
+        // remove any trailing CR/LF chars from the line
+        retVal = ProcessTermToBinaryLine( TrimWhitespace( line ), lineCount, allowDuplicateClocks );
+    }
+    printf( "Processed %d lines\n", lineCount );
+    return retVal;
+}
+
 std::string TrimCharacters( const std::string& Str, const std::string& CharsToTrim )
 {
     // find the index of the first non-CharsToTrim char in Str
@@ -98,87 +195,51 @@ ParseBinaryString( const std::string& BinaryStr, Buffer& BinaryBuff )
     return rawBytes;
 }
 
-int main( int argc, char** argv )
+// each line of text in the file is expected to be of the form "Erlang tuple : <<bytes>>"
+int // 0 => all good, else had an error
+ProcessTermToBinaryLine( const std::string& Line, int LineNumber, bool AllowDuplicateClocks )
 {
-    // validate command line input
-    if ( argc < 2 )
+    // parse the line into the the two pieces we expect
+    auto separator = Line.find( " : " );
+    if ( separator == std::string::npos )
     {
-        printf( "USAGE: bigsetClockValidationTool <BigsetClockFile>\n" );
-        return 1;
+        printf( "Line %d (%s) not in the expected format\n", LineNumber, Line.c_str() );
+        return 10;
     }
 
-    const char* fileName = argv[1];
-    printf( "Parsing bigset clocks in '%s'\n", fileName );
+    std::string termStr = Line.substr( 0, separator );
+    std::string binaryStr = Line.substr( separator + 3 );
 
-    // open the file
-    std::ifstream inputFile( fileName );
-    if ( !inputFile.is_open() )
+    printf( "LINE %02d: %s\n", LineNumber, termStr.c_str() );
+    printf( "       : %s\n", binaryStr.c_str() );
+
+    // parse the binaryStr into a buffer of bytes
+    Buffer binaryBuff;
+    size_t binaryByteCount = ParseBinaryString( binaryStr, binaryBuff );
+    if ( 0 == binaryByteCount )
     {
-        printf( "Unable to open file '%s'\n", fileName );
-        return 2;
+        printf( "Unable to parse the bigset binary string '%s'\n", binaryStr.c_str() );
+        return 11;
+    }
+    printf( "       : %zd bytes\n", binaryByteCount );
+
+    // now create a BigsetClock object from the byte stream
+    Slice binaryValue( binaryBuff.GetCharBuffer(), binaryByteCount );
+    basho::bigset::BigsetClock bigsetClock( AllowDuplicateClocks );
+    std::string errStr;
+    if ( !basho::bigset::BigsetClock::ValueToBigsetClock( binaryValue, bigsetClock, errStr ) )
+    {
+        printf( "Unable to construct a BigsetClock from the binary string '%s'\nERROR: %s\n", binaryStr.c_str(), errStr.c_str() );
+        return 12;
     }
 
-    int retVal = 0;
-
-    // each line of text in the file is expected to be of the form "Erlang tuple : <<bytes>>"
-    int lineCount = 0;
-    std::string line;
-    while ( std::getline( inputFile, line ) )
+    // get the string-version of the BigsetClock object and compare to the
+    // Erlang tuple string from the file
+    std::string bigsetClockStr = bigsetClock.ToString();
+    if ( bigsetClockStr != termStr )
     {
-        ++lineCount;
-
-        // remove any trailing CR/LF chars from the line
-        line = TrimWhitespace( line );
-
-        // parse the line into the the two pieces we expect
-        auto separator = line.find( " : " );
-        if ( separator == std::string::npos )
-        {
-            printf( "Line %d (%s) not in the expected format\n", lineCount, line.c_str() );
-            retVal = 10;
-            break;
-        }
-
-        std::string termStr = line.substr( 0, separator );
-        std::string binaryStr = line.substr( separator + 3 );
-
-        printf( "LINE %02d: %s\n", lineCount, termStr.c_str() );
-        printf( "       : %s\n", binaryStr.c_str() );
-
-        // parse the binaryStr into a buffer of bytes
-        Buffer binaryBuff;
-        size_t binaryByteCount = ParseBinaryString( binaryStr, binaryBuff );
-        if ( 0 == binaryByteCount )
-        {
-            printf( "Unable to parse the bigset binary string '%s'\n", binaryStr.c_str() );
-            retVal = 11;
-            break;
-        }
-        printf( "       : %zd bytes\n", binaryByteCount );
-
-        // now create a BigsetClock object from the byte stream
-        Slice binaryValue( binaryBuff.GetCharBuffer(), binaryByteCount );
-        basho::bigset::BigsetClock bigsetClock;
-        std::string errStr;
-        if ( !basho::bigset::BigsetClock::ValueToBigsetClock( binaryValue, bigsetClock, errStr ) )
-        {
-            printf( "Unable to construct a BigsetClock from the binary string '%s'\nERROR: %s\n", binaryStr.c_str(), errStr.c_str() );
-            retVal = 12;
-            break;
-        }
-
-        // get the string-version of the BigsetClock object and compare to the
-        // Erlang tuple string from the file
-        std::string bigsetClockStr = bigsetClock.ToString();
-        if ( bigsetClockStr != termStr )
-        {
-            printf( "BigsetClock.ToString() '%s' does not match Erlang term from file '%s'\n", bigsetClockStr.c_str(), termStr.c_str() );
-            retVal = 13;
-            break;
-        }
-
-        //if ( lineCount  > 10 ) break;
+        printf( "BigsetClock.ToString() '%s' does not match Erlang term from file '%s'\n", bigsetClockStr.c_str(), termStr.c_str() );
+        return 13;
     }
-    printf( "Processed %d lines\n", lineCount );
-    return retVal;
+    return 0;
 }

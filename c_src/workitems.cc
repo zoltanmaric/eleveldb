@@ -1088,7 +1088,7 @@ work_result RangeScanTask::operator()()
             {
                 // TODO: ensure this is the correct handling of an error
                 sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, ex.what() );
-                return work_result(local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR);
+                return work_result( local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR );
             }
 
             filter_passed = bigset_acc_->RecordReady();
