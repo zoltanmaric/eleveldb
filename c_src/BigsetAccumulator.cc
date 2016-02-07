@@ -97,9 +97,9 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                 // TODO: log an error about creating an Actor object
                 throw std::runtime_error( "Unable to set actor ID" );
             }
-            m_CurrentDots.AddDot( actor,
-                                  keyToAdd.GetCounter(),
-                                  keyToAdd.GetTombstone() );
+            m_CurrentDots.AddPair( actor,
+                                   keyToAdd.GetCounter(),
+                                   keyToAdd.GetTombstone() );
         }
         else if ( keyToAdd.IsEnd() )
         {

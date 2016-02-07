@@ -123,6 +123,17 @@ public:
         bool success = true;
         if ( NewSize > m_BuffSize )
         {
+            // ensure that we have a reasonable allocation granularity
+            // (so that we don't have too many reallocs)
+            size_t diff = NewSize - m_BuffSize;
+            size_t granularity = (SIZE > 1024) ? 1024 : SIZE;
+            if ( diff < granularity )
+            {
+                // the caller is requesting a relatively small increase in
+                // buffer size, so bump up the allocation size a bit
+                NewSize = m_BuffSize + granularity;
+            }
+
             // we need to allocate a larger buffer
             char* pNewBuff = new char[ NewSize ];
             if ( NULL != pNewBuff )

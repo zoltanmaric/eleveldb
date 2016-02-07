@@ -2,23 +2,17 @@
 #include <iostream>
 #include <fstream>
 
-#include "../util/buffer.h"
+#include "../util/utils.h"
 #include "../BigsetClock.h"
 
-typedef basho::utils::Buffer<1024> Buffer;
-
 // local helper functions
-static std::string TrimCharacters( const std::string& Str, const std::string& CharsToTrim );
-static std::string TrimWhitespace( const std::string& Str );
-static size_t ParseBinaryString( const std::string& BinaryStr, Buffer& BinaryBuff );
-static int ProcessTermToBinaryLine( const std::string& Line, int LineNumber, bool AllowDuplicateClocks );
+static int ProcessTermToBinaryLine( const std::string& Line, int LineNumber );
+static int ProcessMergedClocksLine( const std::string& Line, int LineNumber );
 
 // print the command line usage for this application and call exit()
 static void PrintUsageAndExit()
 {
-    fprintf( stderr, "USAGE: bigsetClockValidationTool [Options] [Action]\n" );
-    fprintf( stderr, "\n" );
-    fprintf( stderr, "Options: -a  Allow duplicate actors in a bigset clock\n" );
+    fprintf( stderr, "USAGE: bigsetClockValidationTool <Action>\n" );
     fprintf( stderr, "\n" );
     fprintf( stderr, "Actions: -b<File>  Parse <File> as 'clock : term-to-binary(clock)'\n" );
     fprintf( stderr, "         -m<File>  Parse <File> as 'clock1 : clock2 : merged-clock\n" );
@@ -34,7 +28,6 @@ int main( int argc, char** argv )
 {
     const char* fileName = NULL;
     const char* description = NULL;
-    bool allowDuplicateClocks = false;
 
     enum Action
     {
@@ -50,9 +43,6 @@ int main( int argc, char** argv )
         {
             switch ( argv[j][1] )
             {
-                case 'a':
-                    allowDuplicateClocks = true;
-                    break;
                 case 'b':
                     fileName = argv[j] + 2;
                     description = "bigset clocks in term_to_binary format";
@@ -76,10 +66,6 @@ int main( int argc, char** argv )
     }
 
     printf( "Parsing %s in '%s'\n", description, fileName );
-    if ( allowDuplicateClocks )
-    {
-        printf( "Allowing duplicate actors in the clocks\n" );
-    }
 
     // open the file
     std::ifstream inputFile( fileName );
@@ -97,107 +83,200 @@ int main( int argc, char** argv )
     {
         ++lineCount;
 
-        // remove any trailing CR/LF chars from the line
-        retVal = ProcessTermToBinaryLine( TrimWhitespace( line ), lineCount, allowDuplicateClocks );
+        if ( ParseBinaryClock == action )
+        {
+            retVal = ProcessTermToBinaryLine( line, lineCount );
+        }
+        else if ( CheckMergedClocks == action )
+        {
+            retVal = ProcessMergedClocksLine( line, lineCount );
+        }
+
+        //if ( lineCount > 10 ) break;
     }
     printf( "Processed %d lines\n", lineCount );
     return retVal;
 }
 
-std::string TrimCharacters( const std::string& Str, const std::string& CharsToTrim )
+static bool
+ParseCounterString( const std::string& CounterStr, basho::bigset::Counter& Value )
 {
-    // find the index of the first non-CharsToTrim char in Str
-    auto firstNonCharToTrim = Str.find_first_not_of( CharsToTrim );
-    if ( firstNonCharToTrim == std::string::npos )
-    {
-        // Str is nothing but CharsToTrim (or possibly it's empty)
-        return std::string();
-    }
+    char* pStrEnd = NULL;
+    Value = strtoull( CounterStr.c_str(), &pStrEnd, 10 );
 
-    // find the index of the last non-CharsToTrim char in Str
-    auto lastNonCharToTrim = Str.find_last_not_of( CharsToTrim );
-    if ( lastNonCharToTrim == std::string::npos )
+    // ensure we found an integer and that the conversion ended at the NULL terminator
+    if ( pStrEnd == CounterStr.c_str() || NULL == pStrEnd || 0 != *pStrEnd )
     {
-        // hmm...this shouldn't happen since we already verified above that we
-        // have at least 1 non-CharsToTrim char; at any rate, we have nothing
-        // to return
-        return std::string();
+        return false;
     }
-
-    return Str.substr( firstNonCharToTrim, lastNonCharToTrim - firstNonCharToTrim + 1 ); // second param is length of substring; be sure to include last non-CharsToTrim character
+    return true;
 }
 
-std::string TrimWhitespace( const std::string& Str )
+// parses a version vector or dot cloud string
+//
+// NOTE: this is not a standard erlang list since the enclosing brackets "[]" have already been removed
+static int
+ParseActorTupleString( std::string& ActorTupleStr, bool IsVersionVector, basho::bigset::BigsetClock& Clock )
 {
-    static const std::string c_WhiteSpaceChars = " \n\r\t";
+    // ActorTupleStr is either a version vector string or a dot cloud string
+    //
+    // A version vector string is a list of 0 or more 2-tuples of the form
+    // {Actor :: binary(8), Count :: pos_integer()}
+    //
+    // A dot cloud string is a list of 0 or more 2-tuples of the form
+    // [{Actor :: binary(8), [pos_integer()]}]
+    if ( ActorTupleStr.empty() )
+    {
+        return 0;
+    }
 
-    return TrimCharacters( Str, c_WhiteSpaceChars );
+    // find the opening and closing curly braces and extract the actor ID string
+    auto openingBrace = ActorTupleStr.find( '{' );
+    if ( std::string::npos == openingBrace )
+    {
+        return 40;
+    }
+    auto closingBrace = ActorTupleStr.find( '}', openingBrace + 1 );
+    if ( std::string::npos == closingBrace )
+    {
+        return 41;
+    }
+
+    do
+    {
+        // get the string containing the binary actor ID, followed by the counter integer(s)
+        std::string tupleBinaryStr( ActorTupleStr.substr( openingBrace + 1, closingBrace - openingBrace - 1 ) ); // -1 => don't include closing brace
+
+        // isolate the actor ID, which is an erlang binary term of the form <<1,2,3,4,5,6,7,8>>
+        if ( '<' != tupleBinaryStr[0] || '<' != tupleBinaryStr[1] )
+        {
+            return 42;
+        }
+
+        const std::string actorIdEndStr( ">>," );
+        auto binaryEnd = tupleBinaryStr.find( actorIdEndStr );
+        if ( std::string::npos == binaryEnd )
+        {
+            return 43;
+        }
+
+        std::string actorIdStr( tupleBinaryStr.substr( 0, binaryEnd ) );
+        std::string counterStr( tupleBinaryStr.substr( binaryEnd + actorIdEndStr.size() ) );
+
+        // now convert the actor ID string to binary and create an Actor object
+        basho::utils::ErlBuffer actorIdBuff;
+        size_t actorIdBytes = basho::utils::ParseErlangBinaryString( actorIdStr, actorIdBuff );
+        if ( basho::bigset::Actor::GetActorIdSizeInBytes() != actorIdBytes )
+        {
+            return 44;
+        }
+
+        basho::bigset::Actor actor;
+        if ( !actor.SetId( actorIdBuff.GetCharBuffer(), actorIdBuff.GetBuffSize() ) )
+        {
+            return 45;
+        }
+
+        // now convert the counter string to a list of 1 or more integers
+        if ( IsVersionVector )
+        {
+            basho::bigset::Counter counter;
+            if ( !ParseCounterString( counterStr, counter ) )
+            {
+                return 46;
+            }
+
+            // now add the actor/counter to the version vector in the caller's BigsetClock object
+            if ( !Clock.AddToVersionVector( actor, counter ) )
+            {
+                return 47;
+            }
+        }
+        else
+        {
+            basho::bigset::CounterSet counterSet;
+            // TODO: get the list of integers
+        }
+
+        // see if we have another 2-tuple
+        openingBrace = ActorTupleStr.find( '{', closingBrace );
+        if ( std::string::npos != openingBrace )
+        {
+            closingBrace = ActorTupleStr.find( '}', openingBrace + 1 );
+            if ( std::string::npos == closingBrace )
+            {
+                return 49;
+            }
+        }
+    } while ( std::string::npos != openingBrace );
+    return 0;
 }
 
-size_t // number of bytes put in BinaryBuff; 0 on error
-ParseBinaryString( const std::string& BinaryStr, Buffer& BinaryBuff )
+// parses a bigset clock string in erlang term format, returning a BigsetClock object
+static int
+ParseBigsetClockTermString( const std::string& ClockStr, basho::bigset::BigsetClock& Clock )
 {
-    // start by trimming "<<" and ">>" from BinaryStr
-    static const std::string c_BinaryBracketChars = "<>";
+    // initialize the caller's output object
+    Clock.Clear();
 
-    std::string rawBinaryStr = TrimCharacters( BinaryStr, c_BinaryBracketChars );
-    //printf( "       :   %s\n", rawBinaryStr.c_str() );
-
-    // rawBinaryStr is a series of integer string tokens, separated by commas
-    size_t rawBytes = 0; // number of bytes we've parsed from rawBinaryStr
-    const char* pCur = rawBinaryStr.c_str();
-    while ( 0 != *pCur )
+    // A bigset clock is a 2-tuple {version_vector, dot_cloud}, where
+    // version_vector is a list of 2-tuples of the form
+    //
+    //      [{Actor :: binary(8), Count :: pos_integer()}]
+    //
+    // and dot_cloud is a list of 2-tuples of the form
+    //
+    //      [{Actor :: binary(8), [pos_integer()]}]
+    std::string clockStr( basho::utils::TrimWhitespace( ClockStr ) );
+    auto len = clockStr.size();
+    if ( len < 7 ) // minimum size for an empty clock
     {
-        // convert the next string token to an integer
-        char* pStrEnd = NULL;
-        long value = strtol( pCur, &pStrEnd, 10 );
-
-        // ensure we found an integer at pCur
-        if ( pStrEnd == pCur || NULL == pStrEnd )
-        {
-            // we failed to find any integer characters at pCur
-            rawBytes = 0;
-            break;
-        }
-
-        // the only valid token-terminator characters are a comma or the terminating NULL
-        char endChar = *pStrEnd;
-        if ( ',' != endChar && 0 != endChar )
-        {
-            // found something in the string we didn't expect
-            rawBytes = 0;
-            break;
-        }
-
-        // ensure we have a byte value
-        if ( value < 0 || value > 255 )
-        {
-            rawBytes = 0;
-            break;
-        }
-
-        // store the parsed byte value in the caller's buffer
-        ++rawBytes;
-        if ( !BinaryBuff.EnsureSize( rawBytes ) )
-        {
-            rawBytes = 0;
-            break;
-        }
-        BinaryBuff.GetCharBuffer()[ rawBytes - 1 ] = static_cast<char>( value );
-
-        // move to the next integer
-        pCur = pStrEnd;
-        if ( 0 != endChar )
-        {
-            ++pCur; // we're not at the end of the string, so move past the comma separator char
-        }
+        return 31;
     }
-    return rawBytes;
+
+    // ensure clockStr begins with "{[" and ends with "]}"
+    if ( '{' != clockStr[0] || '[' != clockStr[1] )
+    {
+        return 32;
+    }
+    if ( ']' != clockStr[ len - 2 ] || '}' != clockStr[ len - 1 ] )
+    {
+        return 33;
+    }
+
+    // ensure clockStr is a 2-tuple of lists
+    std::string listSepStr( "],[" );
+    auto listSep = clockStr.find( listSepStr );
+    if ( std::string::npos == listSep )
+    {
+        // didn't find the separator for the two lists in the 2-tuple
+        return 34;
+    }
+    if ( std::string::npos != clockStr.find( listSepStr, listSep + listSepStr.size() ) )
+    {
+        // we have another list tuple item, which shouldn't happen
+        return 35;
+    }
+
+    std::string versionVectorStr( clockStr.substr( 2, listSep - 2 ) );
+    std::string dotCloudStr( clockStr.substr( listSep + listSepStr.size(), len - listSep - listSepStr.size() - 2 ) );
+
+    int retVal = ParseActorTupleString( versionVectorStr, true, Clock ); // true => this is a version vector string
+    if ( 0 != retVal )
+    {
+        return retVal;
+    }
+    retVal = ParseActorTupleString( dotCloudStr, false, Clock ); // false => this is a dot cloud string
+    if ( 0 != retVal )
+    {
+        return retVal;
+    }
+    return 0;
 }
 
 // each line of text in the file is expected to be of the form "Erlang tuple : <<bytes>>"
 int // 0 => all good, else had an error
-ProcessTermToBinaryLine( const std::string& Line, int LineNumber, bool AllowDuplicateClocks )
+ProcessTermToBinaryLine( const std::string& Line, int LineNumber )
 {
     // parse the line into the the two pieces we expect
     auto separator = Line.find( " : " );
@@ -207,15 +286,15 @@ ProcessTermToBinaryLine( const std::string& Line, int LineNumber, bool AllowDupl
         return 10;
     }
 
-    std::string termStr = Line.substr( 0, separator );
-    std::string binaryStr = Line.substr( separator + 3 );
+    std::string termStr   = basho::utils::TrimWhitespace( Line.substr( 0, separator ) );
+    std::string binaryStr = basho::utils::TrimWhitespace( Line.substr( separator + 3 ) );
 
     printf( "LINE %02d: %s\n", LineNumber, termStr.c_str() );
     printf( "       : %s\n", binaryStr.c_str() );
 
     // parse the binaryStr into a buffer of bytes
-    Buffer binaryBuff;
-    size_t binaryByteCount = ParseBinaryString( binaryStr, binaryBuff );
+    basho::utils::ErlBuffer binaryBuff;
+    size_t binaryByteCount = basho::utils::ParseErlangBinaryString( binaryStr, binaryBuff );
     if ( 0 == binaryByteCount )
     {
         printf( "Unable to parse the bigset binary string '%s'\n", binaryStr.c_str() );
@@ -225,7 +304,7 @@ ProcessTermToBinaryLine( const std::string& Line, int LineNumber, bool AllowDupl
 
     // now create a BigsetClock object from the byte stream
     Slice binaryValue( binaryBuff.GetCharBuffer(), binaryByteCount );
-    basho::bigset::BigsetClock bigsetClock( AllowDuplicateClocks );
+    basho::bigset::BigsetClock bigsetClock;
     std::string errStr;
     if ( !basho::bigset::BigsetClock::ValueToBigsetClock( binaryValue, bigsetClock, errStr ) )
     {
@@ -240,6 +319,43 @@ ProcessTermToBinaryLine( const std::string& Line, int LineNumber, bool AllowDupl
     {
         printf( "BigsetClock.ToString() '%s' does not match Erlang term from file '%s'\n", bigsetClockStr.c_str(), termStr.c_str() );
         return 13;
+    }
+    return 0;
+}
+
+// each line of text in the file is expected to be of the form "clock1 : clock2 : mergedClock"
+int // 0 => all good, else had an error
+ProcessMergedClocksLine( const std::string& Line, int LineNumber )
+{
+    // parse the line into the the three pieces we expect
+    const std::string separatorStr( " : " );
+    auto separator1 = Line.find( separatorStr );
+    if ( separator1 == std::string::npos )
+    {
+        printf( "Line %d (%s) not in the expected format\n", LineNumber, Line.c_str() );
+        return 20;
+    }
+    auto separator2 = Line.find( separatorStr, separator1 + separatorStr.size() );
+    if ( separator2 == std::string::npos )
+    {
+        printf( "Line %d (%s) not in the expected format\n", LineNumber, Line.c_str() );
+        return 21;
+    }
+
+    std::string clock1Str       = basho::utils::TrimWhitespace( Line.substr( 0, separator1 ) );
+    std::string clock2Str       = basho::utils::TrimWhitespace( Line.substr( separator1 + 3, separator2 - separator1 - separatorStr.size() ) );
+    std::string mergedClocksStr = basho::utils::TrimWhitespace( Line.substr( separator2 + 3 ) );
+
+    printf( "LINE %02d: %s\n", LineNumber, clock1Str.c_str() );
+    printf( "       : %s\n", clock2Str.c_str() );
+    printf( "       : %s\n", mergedClocksStr.c_str() );
+
+    basho::bigset::BigsetClock clock1;
+    int retVal = ParseBigsetClockTermString( clock1Str, clock1 );
+    if ( 0 != retVal )
+    {
+        printf( "Unable to parse clock string '%s'\n", clock1Str.c_str() );
+        return retVal;
     }
     return 0;
 }

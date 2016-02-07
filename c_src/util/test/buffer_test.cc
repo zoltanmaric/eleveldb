@@ -101,18 +101,53 @@ TEST(Buffer, EnsureSize)
     ASSERT_EQ( BUILTIN_BUFF_SIZE, buff.GetBuffSize() );
     ASSERT_EQ( BUILTIN_BUFF_SIZE, buff.GetBuiltinBuffSize() );
 
-    // try Buffer::EnsureSize() with a value larger than BUILTIN_BUFF_SIZE (buffer size should change)
+    // try Buffer::EnsureSize() with a value larger than BUILTIN_BUFF_SIZE (buffer size should increase)
     ASSERT_TRUE( buff.EnsureSize( BUILTIN_BUFF_SIZE + 1 ) );
-    ASSERT_EQ( BUILTIN_BUFF_SIZE + 1, buff.GetBuffSize() );
-    ASSERT_EQ( BUILTIN_BUFF_SIZE,     buff.GetBuiltinBuffSize() );
+    ASSERT_LT( BUILTIN_BUFF_SIZE, buff.GetBuffSize() );
+    ASSERT_EQ( BUILTIN_BUFF_SIZE, buff.GetBuiltinBuffSize() );
 
     // ensure we get the expected value returned in the pRealloc output parameter
     bool realloc = true;
-    ASSERT_TRUE( buff.EnsureSize( BUILTIN_BUFF_SIZE + 1, &realloc ) ); // BuffSize is already BUILTIN_BUFF_SIZE + 1, so no realloc
+    ASSERT_TRUE( buff.EnsureSize( BUILTIN_BUFF_SIZE + 1, &realloc ) ); // BuffSize is already at least BUILTIN_BUFF_SIZE + 1, so no realloc
     ASSERT_FALSE( realloc );
 
-    ASSERT_TRUE( buff.EnsureSize( BUILTIN_BUFF_SIZE + 2, &realloc ) );
+    ASSERT_TRUE( buff.EnsureSize( buff.GetBuffSize() + 1, &realloc ) );
     ASSERT_TRUE( realloc );
+}
+
+TEST(Buffer, ReallocGranularity)
+{
+    // with a small (less than 1024) builtin buffer, the realloc granularity matches the size of the builtin buffer
+    const size_t BUILTIN_BUFF_SIZE_SMALL = 10;
+
+    Buffer<BUILTIN_BUFF_SIZE_SMALL> buffSmall;
+    ASSERT_EQ( BUILTIN_BUFF_SIZE_SMALL, buffSmall.GetBuffSize() );
+    ASSERT_EQ( BUILTIN_BUFF_SIZE_SMALL, buffSmall.GetBuiltinBuffSize() );
+    ASSERT_TRUE( buffSmall.EnsureSize( buffSmall.GetBuffSize() + 1 ) );
+    ASSERT_EQ( BUILTIN_BUFF_SIZE_SMALL * 2, buffSmall.GetBuffSize() );
+    ASSERT_TRUE( buffSmall.EnsureSize( buffSmall.GetBuffSize() + 1 ) );
+    ASSERT_EQ( BUILTIN_BUFF_SIZE_SMALL * 3, buffSmall.GetBuffSize() );
+
+    // ensure that a larger realloc works as expected
+    size_t largeRealloc = buffSmall.GetBuffSize() + 100;
+    ASSERT_TRUE( buffSmall.EnsureSize( largeRealloc ) );
+    ASSERT_EQ( largeRealloc, buffSmall.GetBuffSize() );
+
+    // with a large (greater than 1024) builtin buffer, the realloc granularity maxes out at 1024
+    const size_t BUILTIN_BUFF_SIZE_LARGE = 2048;
+
+    Buffer<BUILTIN_BUFF_SIZE_LARGE> buffLarge;
+    ASSERT_EQ( BUILTIN_BUFF_SIZE_LARGE, buffLarge.GetBuffSize() );
+    ASSERT_EQ( BUILTIN_BUFF_SIZE_LARGE, buffLarge.GetBuiltinBuffSize() );
+    ASSERT_TRUE( buffLarge.EnsureSize( buffLarge.GetBuffSize() + 1 ) );
+    ASSERT_EQ( BUILTIN_BUFF_SIZE_LARGE + 1024, buffLarge.GetBuffSize() );
+    ASSERT_TRUE( buffLarge.EnsureSize( buffLarge.GetBuffSize() + 1 ) );
+    ASSERT_EQ( BUILTIN_BUFF_SIZE_LARGE + (2*1024), buffLarge.GetBuffSize() );
+
+    // ensure that a larger realloc works as expected
+    largeRealloc = buffLarge.GetBuffSize() + 4096;
+    ASSERT_TRUE( buffLarge.EnsureSize( largeRealloc ) );
+    ASSERT_EQ( largeRealloc, buffLarge.GetBuffSize() );
 }
 
 TEST(Buffer, ContentTest)

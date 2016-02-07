@@ -5,25 +5,32 @@
 #ifndef BASHO_BIGSET_CLOCK_H
 #define BASHO_BIGSET_CLOCK_H
 
-#include "CrdtUtils.h"
-
+#include <map>
+#include <set>
+#include <string>
 #include <stdexcept>
 #include <leveldb/slice.h>
 
 namespace basho {
 namespace bigset {
 
-typedef leveldb::Slice     Slice;
-typedef uint64_t           Counter;
-typedef std::list<Counter> CounterList;
+typedef leveldb::Slice    Slice;
+typedef uint64_t          Counter;
+typedef std::set<Counter> CounterSet;
 
+///////////////////////////////////////////////////////////////////////////////
 // Actor class: represents an actor who performs an action on a bigset
 class Actor
 {
-    char m_ID[8];
+    enum _Constants
+    {
+        ActorIdSizeInBytes = 8
+    };
+    char m_ID[ ActorIdSizeInBytes ];
 
 public:
-    // ctors and assignment operator
+    ///////////////////////////////////
+    // Ctors and Assignment Operator
     Actor()
     {
         Clear();
@@ -93,9 +100,9 @@ public:
     // bytes, throws a std::invalid_argument exception
     int Compare( const char* pData, size_t SizeInBytes ) const;
 
-    int Compare( const Actor& Act ) const
+    int Compare( const Actor& That ) const
     {
-        return Compare( Act.m_ID, sizeof Act.m_ID );
+        return Compare( That.m_ID, sizeof That.m_ID );
     }
 
     int Compare( const Slice& Data ) const
@@ -103,60 +110,205 @@ public:
         return Compare( Data.data(), Data.size() );
     }
 
-    bool operator==( const Actor& Data ) const { return 0 == Compare( Data ); }
-    bool operator!=( const Actor& Data ) const { return 0 != Compare( Data ); }
+    bool operator==( const Actor& That ) const { return 0 == Compare( That ); }
+    bool operator!=( const Actor& That ) const { return 0 != Compare( That ); }
 
     bool operator==( const Slice& Data ) const { return 0 == Compare( Data ); }
     bool operator!=( const Slice& Data ) const { return 0 != Compare( Data ); }
 
+    bool operator<( const Actor& That ) const { return 0 > Compare( That ); }
+
+    ///////////////////////////////////
+    // Miscellaneous Methods
+
     // returns the Actor as a string, in Erlang term format
-    std::string
-    ToString() const;
+    std::string ToString() const;
+
+    // returns the size of an Actor ID in bytes
+    static size_t
+    GetActorIdSizeInBytes() { return ActorIdSizeInBytes; }
 };
 
-typedef basho::crdtUtils::DotContainer<Actor, Counter>     VersionVector;
-typedef basho::crdtUtils::DotContainer<Actor, CounterList> DotCloud;
+///////////////////////////////////////////////////////////////////////////////
+// VersionVector class: contains a collection of Actor/Counter pairs, ordered by Actor
+class VersionVector
+{
+    std::map<Actor, Counter> m_Pairs;
 
+public:
+    ///////////////////////////////////
+    // Ctors and Assignment Operator
+    VersionVector()
+    {}
+
+    VersionVector( const VersionVector& That ) : m_Pairs( That.m_Pairs )
+    {}
+
+    VersionVector& operator=( const VersionVector& That )
+    {
+        if ( this != &That )
+        {
+            Clear();
+            m_Pairs = That.m_Pairs;
+        }
+        return *this;
+    }
+
+    ///////////////////////////////////
+    // Assignment Methods
+
+    // adds an Actor/Counter pair to this version vector; if the Actor is
+    // already present in the version vector, updates the stored event count
+    // iff the caller's Event value is larger than the stored value; returns
+    // true if the pair is added/updated, else false
+    bool AddPair( const Actor& Act, Counter Event, bool IsTombstone );
+    bool AddPair( const Actor& Act, Counter Event )
+    {
+        return AddPair( Act, Event, false );
+    }
+
+    void Clear() { m_Pairs.clear(); }
+
+    // merges the contents of a VersionVector with this object, calling AddPair() for each entry in That
+    bool Merge( const VersionVector& That );
+
+    ///////////////////////////////////
+    // Comparison Methods
+    int Compare( const VersionVector& That ) const;
+
+    bool operator==( const VersionVector& That ) const { return 0 == Compare( That ); }
+    bool operator!=( const VersionVector& That ) const { return 0 != Compare( That ); }
+
+    bool operator<( const VersionVector& That ) const { return 0 > Compare( That ); }
+
+    ///////////////////////////////////
+    // Miscellaneous Methods
+
+    // returns the number of Actor/Counter pairs in this version vector
+    size_t Size() const { return m_Pairs.size(); }
+
+    // returns whether or not this version vector is empty (i.e., does not
+    // contain any Actor/Counter pairs)
+    bool IsEmpty() const { return m_Pairs.empty(); }
+
+    // returns whether or not a specific Actor is present in this version
+    // vector; if the Actor is present, optionally returns the Counter for
+    // the Actor
+    bool ContainsActor( const Actor& Act, Counter* pEvent = NULL ) const;
+
+    // returns the VersionVector as a string, in Erlang term format
+    std::string ToString() const;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// DotCloud class: contains a collection of Actor/CounterSet pairs, ordered by Actor
+class DotCloud
+{
+    std::map<Actor, CounterSet> m_Dots;
+
+public:
+    ///////////////////////////////////
+    // Ctors and Assignment Operator
+    DotCloud()
+    {}
+
+    DotCloud( const DotCloud& That ) : m_Dots( That.m_Dots )
+    {}
+
+    DotCloud& operator=( const DotCloud& That )
+    {
+        if ( this != &That )
+        {
+            Clear();
+            m_Dots = That.m_Dots;
+        }
+        return *this;
+    }
+
+    ///////////////////////////////////
+    // Assignment Methods
+
+    // adds an Actor/Counter pair to this dot cloud; if the Actor is
+    // already present in the dot cloud, updates the stored event set
+    // iff the caller's Event value is not already in the set; returns
+    // true if the pair is added/updated, else false
+    bool AddDot( const Actor& Act, Counter Event );
+
+    // adds an Actor/CounterSet pair to this dot cloud; if the Actor is
+    // already present in the dot cloud, calls AddDot() for each value in
+    // Events; returns true if any updates are made to the dot cloud
+    bool AddDots( const Actor& Act, const CounterSet& Events );
+
+    void Clear() { m_Dots.clear(); }
+
+    // merges the contents of a DotCloud with this object, calling AddDots() for each entry in That
+    bool Merge( const DotCloud& That );
+
+    ///////////////////////////////////
+    // Comparison Methods
+    int Compare( const DotCloud& That ) const;
+
+    bool operator==( const DotCloud& That ) const { return 0 == Compare( That ); }
+    bool operator!=( const DotCloud& That ) const { return 0 != Compare( That ); }
+
+    bool operator<( const DotCloud& That ) const { return 0 > Compare( That ); }
+
+    ///////////////////////////////////
+    // Miscellaneous Methods
+
+    // returns the number of Actor/CounterSet pairs in this dot cloud
+    size_t Size() const { return m_Dots.size(); }
+
+    // returns whether or not this dot cloud is empty (i.e., does not
+    // contain any Actor/CounterSet pairs)
+    bool IsEmpty() const { return m_Dots.empty(); }
+
+    // returns whether or not a specific Actor is present in this dot cloud;
+    // if the Actor is present, optionally returns the CounterSet for
+    // the Actor
+    bool ContainsActor( const Actor& Act, CounterSet* pEvents = NULL ) const;
+
+    // returns the VersionVector as a string, in Erlang term format
+    std::string ToString() const;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// BigsetClock class
 class BigsetClock
 {
     VersionVector m_VersionVector;
     DotCloud      m_DotCloud;
-    bool          m_AllowDuplicateActors;
 
 public:
-    BigsetClock( bool AllowDuplicateActors = false ) : m_AllowDuplicateActors( AllowDuplicateActors )
-    { }
+    ///////////////////////////////////
+    // Ctors and Assignment Operator
+    BigsetClock() {}
+    BigsetClock( const BigsetClock& That ) : m_VersionVector( That.m_VersionVector ), m_DotCloud( That.m_DotCloud )
+    {}
 
-//    virtual ~BigsetClock() { }
+    BigsetClock& operator=( const BigsetClock& That )
+    {
+        if ( this != &That )
+        {
+            m_VersionVector = That.m_VersionVector;
+            m_DotCloud = That.m_DotCloud;
+        }
+        return *this;
+    }
 
+    ///////////////////////////////////
+    // Assignment Methods
     bool // true => <Act,Event> added to the version vector, else not (likely because Act is already present)
     AddToVersionVector( const Actor& Act, Counter Event );
 
-    bool // true => <Act, Evetns> added tot he dot cloud, else not (likely because Act is already present)
-    AddToDotCloud( const Actor& Act, const CounterList& Events );
+    bool // true => <Act, Events> added to the dot cloud, else not (likely because Act is already present)
+    AddToDotCloud( const Actor& Act, const CounterSet& Events );
 
     void Clear()
     {
         m_VersionVector.Clear();
         m_DotCloud.Clear();
     }
-
-    void
-    Merge( const BigsetClock& /*clock*/ )
-    {
-        // TODO: fill in details for Dots::Join()
-    }
-
-    VersionVector
-    SubtractSeen( const VersionVector& /*dots*/ )
-    {
-        // TODO: fill in details: look at erlang code
-        return VersionVector();
-    }
-
-    // return the bigset clock object as a string, in Erlang term format
-    std::string
-    ToString() const;
 
     // parses a serialized bigset clock (serialization format is erlang's
     // external term format, http://erlang.org/doc/apps/erts/erl_ext_dist.html),
@@ -166,6 +318,36 @@ public:
         const Slice&  Value,   // IN:  serialized bigset clock
         BigsetClock&  Clock,   // OUT: receives the parsed bigset clock
         std::string&  Error ); // OUT: if false returned, contains a description of the error
+
+    ///////////////////////////////////
+    // Comparison Methods
+    int Compare( const BigsetClock& That ) const;
+
+    bool operator==( const BigsetClock& That ) const { return 0 == Compare( That ); }
+    bool operator!=( const BigsetClock& That ) const { return 0 != Compare( That ); }
+
+    ///////////////////////////////////
+    // Basic Operations on a BigsetClock
+    bool // true => merge succeeded, else false
+    Merge( const BigsetClock& That );
+
+    VersionVector
+    SubtractSeen( const VersionVector& /*dots*/ )
+    {
+        // TODO: fill in details: look at erlang code
+        return VersionVector();
+    }
+
+    ///////////////////////////////////
+    // Miscellaneous Methods
+
+    // returns whether or not this bigset clock is empty (i.e., does not
+    // contain any entries in its version vector or dot cloud)
+    bool IsEmpty() const { return m_VersionVector.IsEmpty() && m_DotCloud.IsEmpty(); }
+
+    // return the bigset clock object as a string, in Erlang term format
+    std::string
+    ToString() const;
 
 private:
     // helper methods used by ValueToBigsetClock()
@@ -211,7 +393,7 @@ private:
     GetInteger( Slice& Data, Counter& Value, std::string& Error );
 
     static bool
-    GetIntegerList( Slice& Data, CounterList& Values, std::string& Error );
+    GetIntegerList( Slice& Data, CounterSet& Values, std::string& Error );
 
     static void
     FormatUnrecognizedRecordTypeError( std::string& Error, char RecordId );

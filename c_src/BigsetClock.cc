@@ -55,6 +55,291 @@ std::string Actor::ToString() const
 /////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////
 //
+// VersionVector class
+//
+/////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////
+
+bool VersionVector::AddPair( const Actor& Act, Counter Event, bool IsTombstone )
+{
+    bool retVal = false;
+    if ( !IsTombstone )
+    {
+        auto result = m_Pairs.insert( std::pair<Actor, Counter>( Act, Event ) );
+        retVal = result.second;
+        if ( !retVal )
+        {
+            // the Actor is already in the map, so see if the incoming Event
+            // value is larger than the one in the map
+            if ( (*result.first).second < Event )
+            {
+                (*result.first).second = Event;
+                retVal = true;
+            }
+        }
+    }
+    return retVal;
+}
+
+bool VersionVector::Merge( const VersionVector& That )
+{
+    if ( this != &That )
+    {
+        for ( auto vvIt = That.m_Pairs.begin(); vvIt != That.m_Pairs.end(); ++vvIt )
+        {
+            AddPair( (*vvIt).first, (*vvIt).second );
+        }
+    }
+    return true;
+}
+
+bool VersionVector::ContainsActor( const Actor& Act, Counter* pEvent ) const
+{
+    auto pairIt = m_Pairs.find( Act );
+    bool actorPresent = (pairIt != m_Pairs.end());
+    if ( actorPresent && pEvent != NULL )
+    {
+        *pEvent = (*pairIt).second;
+    }
+    return actorPresent;
+}
+
+int VersionVector::Compare( const VersionVector& That ) const
+{
+    // if comparing to self, then definitely equal
+    if ( this == &That )
+    {
+        return 0;
+    }
+
+    // see if That has a different number of entries than this object
+    const size_t thisSize = Size();
+    const size_t thatSize = That.Size();
+    if ( thisSize < thatSize )
+    {
+        return -1;
+    }
+    if ( thisSize > thatSize )
+    {
+        return 1;
+    }
+
+    // this object has the same number of entries as That, so we need to compare entry-by-entry
+    int retVal = 0;
+    auto thisIt = m_Pairs.begin();
+    auto thatIt = That.m_Pairs.begin();
+    for ( size_t j = 0; 0 == retVal && j < thisSize; ++j, ++thisIt, ++thatIt )
+    {
+        // compare the Actor objects
+        retVal = (*thisIt).first.Compare( (*thatIt).first );
+        if ( 0 == retVal )
+        {
+            // the Actor objects are the same, so compare the event Counter values
+            Counter thisCounter = (*thisIt).second;
+            Counter thatCounter = (*thatIt).second;
+            if ( thisCounter < thatCounter )
+            {
+                retVal = -1;
+            }
+            else if ( thisCounter > thatCounter )
+            {
+                retVal = 1;
+            }
+        }
+    }
+    return retVal;
+}
+
+std::string VersionVector::ToString() const
+{
+    std::stringstream versionVectorStr;
+    int j = 0;
+    for ( auto pairIt = m_Pairs.begin(); pairIt != m_Pairs.end(); ++pairIt )
+    {
+        if ( j++ > 0 )
+        {
+            versionVectorStr << ',';
+        }
+        versionVectorStr << '{';
+        versionVectorStr << (*pairIt).first.ToString();
+        versionVectorStr << ',';
+        versionVectorStr << (*pairIt).second;
+        versionVectorStr << '}';
+    }
+    return versionVectorStr.str();
+}
+
+/////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////
+//
+// DotCloud class
+//
+/////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////
+
+bool DotCloud::AddDot( const Actor& Act, Counter Event )
+{
+    CounterSet eventsIn;
+    eventsIn.insert( Event );
+
+    auto result = m_Dots.insert( std::pair<Actor, CounterSet>( Act, eventsIn ) );
+    bool retVal = result.second;
+    if ( !retVal )
+    {
+        // the Actor is already in the map, so see if the incoming Event
+        // value already in the Actor's CounterSet
+        CounterSet& events( (*result.first).second );
+        auto result2 = events.insert( Event );
+        retVal = result2.second;
+    }
+    return retVal;
+}
+
+bool DotCloud::AddDots( const Actor& Act, const CounterSet& Events )
+{
+    auto result = m_Dots.insert( std::pair<Actor, CounterSet>( Act, Events ) );
+    bool retVal = result.second;
+    if ( !retVal )
+    {
+        // the Actor is already in the map, so see if we can add any of the
+        // events from the caller's CounterSet
+        for ( auto eventIt = Events.begin(); eventIt != Events.end(); ++eventIt )
+        {
+            bool eventRetVal = AddDot( Act, *eventIt );
+            if ( eventRetVal )
+            {
+                retVal = true;
+            }
+        }
+    }
+    return retVal;
+}
+
+bool DotCloud::Merge( const DotCloud& That )
+{
+    if ( this != &That )
+    {
+        for ( auto dcIt = That.m_Dots.begin(); dcIt != That.m_Dots.end(); ++dcIt )
+        {
+            AddDots( (*dcIt).first, (*dcIt).second );
+        }
+    }
+    return true;
+}
+
+int DotCloud::Compare( const DotCloud& That ) const
+{
+    // if comparing to self, then definitely equal
+    if ( this == &That )
+    {
+        return 0;
+    }
+
+    // see if That has a different number of entries than this object
+    const size_t thisSize = Size();
+    const size_t thatSize = That.Size();
+    if ( thisSize < thatSize )
+    {
+        return -1;
+    }
+    if ( thisSize > thatSize )
+    {
+        return 1;
+    }
+
+    // this object has the same number of entries as That, so we need to compare entry-by-entry
+    int retVal = 0;
+    auto thisIt = m_Dots.begin();
+    auto thatIt = That.m_Dots.begin();
+    for ( size_t j = 0; 0 == retVal && j < thisSize; ++j, ++thisIt, ++thatIt )
+    {
+        // compare the Actor objects
+        retVal = (*thisIt).first.Compare( (*thatIt).first );
+        if ( 0 == retVal )
+        {
+            // the Actor objects are the same, so compare the CounterSet objects
+            size_t thisDotCount = (*thisIt).second.size();
+            size_t thatDotCount = (*thatIt).second.size();
+            if ( thisDotCount < thatDotCount )
+            {
+                retVal = -1;
+            }
+            else if ( thisDotCount > thatDotCount )
+            {
+                retVal = 1;
+            }
+            else
+            {
+                // the CounterSet objects contain the same number of events, so
+                // compare the individual Counter values
+                const CounterSet& thisCounterSet( (*thisIt).second );
+                const CounterSet& thatCounterSet( (*thatIt).second );
+                auto thisCounterIt = thisCounterSet.begin();
+                auto thatCounterIt = thatCounterSet.begin();
+                for ( size_t k = 0; 0 == retVal && k < thisDotCount; ++k, ++thisCounterIt, ++thatCounterIt )
+                {
+                    Counter thisCounter = *thisCounterIt;
+                    Counter thatCounter = *thatCounterIt;
+                    if ( thisCounter < thatCounter )
+                    {
+                        retVal = -1;
+                    }
+                    else if ( thisCounter > thatCounter )
+                    {
+                        retVal = 1;
+                    }
+                }
+            }
+        }
+    }
+    return retVal;
+}
+
+bool DotCloud::ContainsActor( const Actor& Act, CounterSet* pEvents ) const
+{
+    auto dotsIt = m_Dots.find( Act );
+    bool actorPresent = (dotsIt != m_Dots.end());
+    if ( actorPresent && pEvents != NULL )
+    {
+        pEvents->clear();
+        *pEvents = (*dotsIt).second;
+    }
+    return actorPresent;
+}
+
+std::string DotCloud::ToString() const
+{
+    std::stringstream dotCloudStr;
+    int j = 0;
+    for ( auto dotsIt = m_Dots.begin(); dotsIt != m_Dots.end(); ++dotsIt )
+    {
+        if ( j++ > 0 )
+        {
+            dotCloudStr << ',';
+        }
+        dotCloudStr << '{';
+        dotCloudStr << (*dotsIt).first.ToString();
+        dotCloudStr << ",[";
+
+        int k = 0;
+        const CounterSet& events( (*dotsIt).second );
+        for ( auto evIt = events.begin(); evIt != events.end(); ++evIt )
+        {
+            if ( k++ > 0 )
+            {
+                dotCloudStr << ',';
+            }
+            dotCloudStr << (*evIt);
+        }
+
+        dotCloudStr << "]}";
+    }
+    return dotCloudStr.str();
+}
+
+/////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////
+//
 // BigsetClock class
 //
 /////////////////////////////////////////////////////////////////////
@@ -64,51 +349,13 @@ std::string
 BigsetClock::ToString() const
 {
     std::stringstream bigsetClockStr;
+
     bigsetClockStr << "{[";
-
-    int j = 0;
-    auto vv( m_VersionVector.GetDots() );
-    for ( auto vvIt = vv.begin(); vvIt != vv.end(); ++vvIt )
-    {
-        if ( j++ > 0 )
-        {
-            bigsetClockStr << ',';
-        }
-        bigsetClockStr << '{';
-        bigsetClockStr << (*vvIt).GetActor().ToString();
-        bigsetClockStr << ',';
-        bigsetClockStr << (*vvIt).GetCounter();
-        bigsetClockStr << '}';
-    }
-
+    bigsetClockStr << m_VersionVector.ToString();
     bigsetClockStr << "],[";
-
-    j = 0;
-    auto dotCloud( m_DotCloud.GetDots() );
-    for ( auto dcIt = dotCloud.begin(); dcIt != dotCloud.end(); ++dcIt )
-    {
-        if ( j++ > 0 )
-        {
-            bigsetClockStr << ',';
-        }
-        bigsetClockStr << '{';
-        bigsetClockStr << (*dcIt).GetActor().ToString();
-        bigsetClockStr << ",[";
-
-        int k = 0;
-        const CounterList& events( (*dcIt).GetCounter() );
-        for ( auto evIt = events.begin(); evIt != events.end(); ++evIt )
-        {
-            if ( k++ > 0 )
-            {
-                bigsetClockStr << ',';
-            }
-            bigsetClockStr << (*evIt);
-        }
-
-        bigsetClockStr << "]}";
-    }
+    bigsetClockStr << m_DotCloud.ToString();
     bigsetClockStr << "]}";
+
     return bigsetClockStr.str();
 }
 
@@ -118,7 +365,7 @@ BigsetClock::ToString() const
 //
 // Bigset clocks are serialized in Erlang using term_to_binary().
 //
-// A bigset clock is a 2-tuple { version_vector, dot_cloud }, where
+// A bigset clock is a 2-tuple {version_vector, dot_cloud}, where
 // version_vector is a list of 2-tuples of the form
 //
 //      [{Actor :: binary(8), Count :: pos_integer()}]
@@ -259,7 +506,7 @@ BigsetClock::ProcessListOfTwoTuples(
         }
         else
         {
-            CounterList events;
+            CounterSet events;
             if ( !GetIntegerList( Data, events, getEventError ) )
             {
                 std::string specificError( "error getting event list" );
@@ -485,14 +732,14 @@ BigsetClock::GetActor( Slice& Data, Actor& Act )
     }
     Data.remove_prefix( 1 );
 
-    // get the length of the binary byte stream and ensure it's 8
+    // get the length of the binary byte stream and ensure it's the right size
     uint32_t length;
-    if ( !GetBigEndianUint32( Data, length ) || 8 != length )
+    if ( !GetBigEndianUint32( Data, length ) || Actor::GetActorIdSizeInBytes() != length )
     {
         return false;
     }
 
-    // copy the 8 bytes of binary data to the Actor object
+    // copy the binary data to the Actor object
     return Act.SetId( Data );
 }
 
@@ -551,7 +798,7 @@ BigsetClock::GetInteger(
 bool
 BigsetClock::GetIntegerList(
     Slice&       Data,
-    CounterList& Values,
+    CounterSet&  Values,
     std::string& Error )
 {
     // initialize the caller's output value
@@ -601,7 +848,7 @@ BigsetClock::GetIntegerList(
             {
                 while ( len-- > 0 )
                 {
-                    Values.push_back( static_cast<uint8_t>( Data[0] ) );
+                    Values.insert( static_cast<uint8_t>( Data[0] ) );
                     Data.remove_prefix( 1 );
                 }
             }
@@ -633,7 +880,7 @@ BigsetClock::GetIntegerList(
                     retVal = GetInteger( Data, value, Error );
                     if ( retVal )
                     {
-                        Values.push_back( value );
+                        Values.insert( value );
                     }
                 }
             }
@@ -677,24 +924,53 @@ bool // true => <Act,Event> added to the version vector, else not (likely becaus
 BigsetClock::AddToVersionVector( const Actor& Act, Counter Event )
 {
     // check if the caller's Actor is already in m_VersionVector; if so, do not re-add
-    if ( !m_AllowDuplicateActors && m_VersionVector.ContainsActor( Act ) )
+    if ( m_VersionVector.ContainsActor( Act ) )
     {
         return false;
     }
-    m_VersionVector.AddDot( Act, Event );
+    m_VersionVector.AddPair( Act, Event );
     return true;
 }
 
-bool // true => <Act, Evetns> added tot he dot cloud, else not (likely because Act is already present)
-BigsetClock::AddToDotCloud( const Actor& Act, const CounterList& Events )
+bool // true => <Act, Events> added to the dot cloud, else not (likely because Act is already present)
+BigsetClock::AddToDotCloud( const Actor& Act, const CounterSet& Events )
 {
     // check if the caller's Actor is already in m_VersionVector; if so, do not re-add
-    if ( !m_AllowDuplicateActors && m_DotCloud.ContainsActor( Act ) )
+    if ( m_DotCloud.ContainsActor( Act ) )
     {
         return false;
     }
-    m_DotCloud.AddDot( Act, Events );
+    m_DotCloud.AddDots( Act, Events );
     return true;
 }
+
+int BigsetClock::Compare( const BigsetClock& That ) const
+{
+    // if comparing to self, then definitely equal
+    if ( this == &That )
+    {
+        return 0;
+    }
+
+    int retVal = m_VersionVector.Compare( That.m_VersionVector );
+    if ( 0 == retVal )
+    {
+        retVal = m_DotCloud.Compare( That.m_DotCloud );
+    }
+    return retVal;
+}
+
+bool BigsetClock::Merge( const BigsetClock& That )
+{
+    // merging is an idempotent operation, so merging with self does nothing
+    if ( this == &That )
+    {
+        return true;
+    }
+
+    // first merge the two VersionVector objects, then merge the DotCloud objects
+    return (m_VersionVector.Merge( That.m_VersionVector ) && m_DotCloud.Merge( That.m_DotCloud ));
+}
+
 } // namespace bigset
 } // namespace basho
