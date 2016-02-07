@@ -628,20 +628,27 @@ static void BigsetClockAddToDotCloud( BigsetClock& Clock, char ActorId, CounterS
     Clock.AddToDotCloud( actor, Events );
 }
 
+static void CreateBigsetClock( BigsetClock& Clock )
+{
+    // construct Clock = {[{a, 2}, {b, 9}, {z, 4}], [{a, [7]}, {c, [99]}]}
+    BigsetClockAddToVersionVector( Clock, 'a', 2 );
+    BigsetClockAddToVersionVector( Clock, 'b', 9 );
+    BigsetClockAddToVersionVector( Clock, 'z', 4 );
+
+    CounterSet events;
+    events.insert( 7 );
+    BigsetClockAddToDotCloud( Clock, 'a', events );
+
+    events.clear();
+    events.insert( 99 );
+    BigsetClockAddToDotCloud( Clock, 'c', events );
+}
+
 TEST(BigsetClock, Merge_Idempotent)
 {
     // construct a BigsetClock with some stuff in its version vector and dot cloud
     BigsetClock clock1;
-    BigsetClockAddToVersionVector( clock1, 'a', 2 );
-    BigsetClockAddToVersionVector( clock1, 'b', 9 );
-    BigsetClockAddToVersionVector( clock1, 'z', 4 );
-
-    CounterSet events;
-    events.insert( 7 );
-    BigsetClockAddToDotCloud( clock1, 'a', events );
-    events.clear();
-    events.insert( 99 );
-    BigsetClockAddToDotCloud( clock1, 'c', events );
+    CreateBigsetClock( clock1 );
 
     // save a reference copy of clock1
     const BigsetClock clock1Ref( clock1 );
@@ -656,16 +663,7 @@ TEST(BigsetClock, Merge_Identity)
 {
     // construct a BigsetClock with some stuff in its version vector and dot cloud
     BigsetClock clock1;
-    BigsetClockAddToVersionVector( clock1, 'a', 2 );
-    BigsetClockAddToVersionVector( clock1, 'b', 9 );
-    BigsetClockAddToVersionVector( clock1, 'z', 4 );
-
-    CounterSet events;
-    events.insert( 7 );
-    BigsetClockAddToDotCloud( clock1, 'a', events );
-    events.clear();
-    events.insert( 99 );
-    BigsetClockAddToDotCloud( clock1, 'c', events );
+    CreateBigsetClock( clock1 );
 
     // save a reference copy of clock1
     const BigsetClock clock1Ref( clock1 );
@@ -682,4 +680,62 @@ TEST(BigsetClock, Merge_Identity)
     ASSERT_TRUE( clock2.Merge( clock1 ) );
     ASSERT_TRUE( clock2 == clock1Ref );
     ASSERT_FALSE( clock2.IsEmpty() );
+}
+
+TEST(BigsetClock, Merge_Concurrent)
+{
+    // construct a BigsetClock with some stuff in its version vector and dot cloud
+    BigsetClock clock1; // {[{a, 2}, {b, 9}, {z, 4}], [{a, [7]}, {c, [99]}]}
+    CreateBigsetClock( clock1 );
+
+    // construct a second BigsetClock with stuff in its dot cloud but not its VV
+    BigsetClock clock2; // {[], [{a, [3, 4, 5, 6]}, {d, [2]}, {z, [6]}]}
+    CounterSet events;
+    events.insert( 3 );
+    events.insert( 4 );
+    events.insert( 5 );
+    events.insert( 6 );
+    BigsetClockAddToDotCloud( clock2, 'a', events );
+
+    events.clear();
+    events.insert( 2 );
+    BigsetClockAddToDotCloud( clock2, 'd', events );
+
+    events.clear();
+    events.insert( 6 );
+    BigsetClockAddToDotCloud( clock2, 'z', events );
+
+    // construct the expected result of merging the two
+    BigsetClock clockMerged; // {[{a, 7}, {b, 9}, {z, 4}], [{c, [99]}, {d, [2]}, {z, [6]}]}
+    BigsetClockAddToVersionVector( clockMerged, 'a', 7 );
+    BigsetClockAddToVersionVector( clockMerged, 'b', 9 );
+    BigsetClockAddToVersionVector( clockMerged, 'z', 4 );
+
+    events.clear();
+    events.insert( 99 );
+    BigsetClockAddToDotCloud( clockMerged, 'c', events );
+
+    events.clear();
+    events.insert( 2 );
+    BigsetClockAddToDotCloud( clockMerged, 'd', events );
+
+    events.clear();
+    events.insert( 6 );
+    BigsetClockAddToDotCloud( clockMerged, 'z', events );
+
+    // make reference copies of clock1/2
+    const BigsetClock clock1Ref( clock1 ), clock2Ref( clock2 );
+
+    // now try merging clock2 into clock1
+    ASSERT_TRUE( clock1.Merge( clock2 ) );
+    ASSERT_TRUE( clock1 == clockMerged );
+
+    // reset clock1 and try merging the other direction
+    clock1 = clock1Ref;
+    ASSERT_TRUE( clock1 == clock1Ref );
+    ASSERT_TRUE( clock2 == clock2Ref );
+    ASSERT_TRUE( clock1 != clockMerged ); // just for good measure
+
+    ASSERT_TRUE( clock2.Merge( clock1 ) );
+    ASSERT_TRUE( clock2 == clockMerged );
 }

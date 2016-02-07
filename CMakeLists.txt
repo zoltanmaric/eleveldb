@@ -33,7 +33,6 @@ set(ELEVELDB_SRCS
         c_src/BigsetKey.cc
         c_src/cmp.cc
         c_src/CmpUtil.cc
-        c_src/CrdtUtils.h
         c_src/DataType.cc
         c_src/detail.hpp
         c_src/eleveldb.cc

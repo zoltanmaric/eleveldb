@@ -18,6 +18,8 @@ typedef leveldb::Slice    Slice;
 typedef uint64_t          Counter;
 typedef std::set<Counter> CounterSet;
 
+class BigsetClock; // forward decl for friend decls
+
 ///////////////////////////////////////////////////////////////////////////////
 // Actor class: represents an actor who performs an action on a bigset
 class Actor
@@ -135,6 +137,8 @@ class VersionVector
 {
     std::map<Actor, Counter> m_Pairs;
 
+    friend class BigsetClock;
+
 public:
     ///////////////////////////////////
     // Ctors and Assignment Operator
@@ -205,6 +209,8 @@ public:
 class DotCloud
 {
     std::map<Actor, CounterSet> m_Dots;
+
+    friend class BigsetClock;
 
 public:
     ///////////////////////////////////
@@ -330,6 +336,9 @@ public:
     // Basic Operations on a BigsetClock
     bool // true => merge succeeded, else false
     Merge( const BigsetClock& That );
+
+    bool // true => compression of seen dots succeeded
+    CompressSeen();
 
     VersionVector
     SubtractSeen( const VersionVector& /*dots*/ )

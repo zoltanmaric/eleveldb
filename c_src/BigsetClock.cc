@@ -969,7 +969,90 @@ bool BigsetClock::Merge( const BigsetClock& That )
     }
 
     // first merge the two VersionVector objects, then merge the DotCloud objects
-    return (m_VersionVector.Merge( That.m_VersionVector ) && m_DotCloud.Merge( That.m_DotCloud ));
+    bool retVal = m_VersionVector.Merge( That.m_VersionVector );
+    if ( retVal )
+    {
+        retVal = m_DotCloud.Merge( That.m_DotCloud );
+        if ( retVal )
+        {
+            // all is good so far, so compress as much as possible
+            retVal = CompressSeen();
+        }
+    }
+    return retVal;
+}
+
+bool BigsetClock::CompressSeen()
+{
+    // walk through the entries in the dot cloud; for each, if the actor is in
+    // the version vector, then see if we have contiguous events that can be
+    // compacted
+
+    // TODO: clean this up to not directly use the data members of m_DotCount and m_VersionVector
+    std::map<Actor, Counter>& versionVector( m_VersionVector.m_Pairs );
+    std::map<Actor, CounterSet>& dotCloud( m_DotCloud.m_Dots );
+    for ( auto dcIt = dotCloud.begin(); dcIt != dotCloud.end(); /* dcIt advanced below */ )
+    {
+        // get the actor/events for this dot cloud entry
+        const Actor& actor( (*dcIt).first );
+        CounterSet& events( (*dcIt).second );
+
+        // does the actor from this dot cloud entry appear in the version vector?
+        auto vvIt = versionVector.find( actor );
+        if ( vvIt != versionVector.end() )
+        {
+            // yes, the actor from the dot cloud entry is in the version vector;
+            // we walk the list of events in this dot cloud entry, checking if
+            // an event is contiguous with the VV (can then compress) or dominated
+            // by the VV (can then remove)
+            Counter vvEvent = (*vvIt).second;
+            for ( auto eventIt = events.begin(); eventIt != events.end(); /* eventIt advanced below */ )
+            {
+                Counter dcEvent = *eventIt;
+                if ( dcEvent == vvEvent + 1 )
+                {
+                    // the events are contiguous, so we can compress
+                    (*vvIt).second = ++vvEvent;
+                    events.erase( eventIt++ );
+                }
+                else if ( dcEvent <= vvEvent )
+                {
+                    // DC event dominated by VV event, so erase
+                    events.erase( eventIt++ );
+                }
+                else
+                {
+                    ++eventIt;
+                }
+            }
+
+            // advance our dot cloud iterator; if we removed all the events from
+            // this dot cloud entry, then remove the entry
+            if ( events.empty() )
+            {
+                dotCloud.erase( dcIt++ );
+            }
+            else
+            {
+                ++dcIt;
+            }
+        }
+        else
+        {
+            // no, the actor from the dot cloud entry is not in the version vector;
+            // if the event value is 1, then we can move this entry to the version vector
+            if ( events.size() == 1 && events.count( 1 ) == 1 )
+            {
+                m_VersionVector.AddPair( actor, 1 );
+                dotCloud.erase( dcIt++ );
+            }
+            else
+            {
+                ++dcIt;
+            }
+        }
+    }
+    return true;
 }
 
 } // namespace bigset
