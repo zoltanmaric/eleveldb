@@ -608,23 +608,26 @@ TEST(BigsetClock, ValueToBigsetClock)
     }
 }
 
-static void BigsetClockAddToVersionVector( BigsetClock& Clock, char ActorId, Counter Event )
+static void CreateActor( Actor& Act, char ActorId )
 {
     // create an Actor object from the specified ActorId byte
     char actorId[8];
-    memset( actorId, ActorId, sizeof actorId );
+    ::memset( actorId, ActorId, sizeof actorId );
     Slice actorIdSlice( actorId, sizeof actorId );
-    Actor actor( actorIdSlice );
+    Act.SetId( actorIdSlice );
+}
+
+static void BigsetClockAddToVersionVector( BigsetClock& Clock, char ActorId, Counter Event )
+{
+    Actor actor;
+    CreateActor( actor, ActorId );
     Clock.AddToVersionVector( actor, Event );
 }
 
 static void BigsetClockAddToDotCloud( BigsetClock& Clock, char ActorId, CounterSet Events )
 {
-    // create an Actor object from the specified ActorId byte
-    char actorId[8];
-    memset( actorId, ActorId, sizeof actorId );
-    Slice actorIdSlice( actorId, sizeof actorId );
-    Actor actor( actorIdSlice );
+    Actor actor;
+    CreateActor( actor, ActorId );
     Clock.AddToDotCloud( actor, Events );
 }
 
@@ -817,4 +820,83 @@ TEST(BigsetClock, Merge_Concurrent)
     // now merge clock12Merged into clock3
     ASSERT_TRUE( clock3.Merge( clock12Merged ) );
     ASSERT_TRUE( clock3 == clock123Merged );
+}
+
+static void AddToDotList( DotList& Dots, char ActorId, Counter Event )
+{
+    // create an Actor object from the specified ActorId byte
+    char actorId[8];
+    memset( actorId, ActorId, sizeof actorId );
+    Slice actorIdSlice( actorId, sizeof actorId );
+    Actor actor( actorIdSlice );
+    Dots.AddPair( actor, Event );
+}
+
+TEST(BigsetClock, IsSeen)
+{
+    // create a BigsetClock with a known state and query whether or not
+    // it has seen various actor/event pairs
+    BigsetClock clock; // {[{a, 2}, {b, 9}, {z, 4}], [{a, [7]}, {c, [99]}]}
+    CreateBigsetClocks( clock );
+
+    // create the various actors we want to query
+    Actor actorA, actorC, actorX, actorZ;
+    CreateActor( actorA, 'a' );
+    CreateActor( actorC, 'c' );
+    CreateActor( actorX, 'x' );
+    CreateActor( actorZ, 'z' );
+
+    ASSERT_TRUE( clock.IsSeen( actorA, 1 ) );
+    ASSERT_TRUE( clock.IsSeen( actorZ, 4 ) );
+    ASSERT_TRUE( clock.IsSeen( actorC, 99 ) );
+
+    ASSERT_FALSE( clock.IsSeen( actorA, 5 ) );
+    ASSERT_FALSE( clock.IsSeen( actorX, 1 ) );
+    ASSERT_FALSE( clock.IsSeen( actorC, 1 ) );
+}
+
+TEST(BigsetClock, SubtractSeen)
+{
+    // create a simple DotList with a couple entries
+    DotList dotList1;
+    AddToDotList( dotList1, 'a', 2 );
+    AddToDotList( dotList1, 'b', 7 );
+
+    // save a reference copy of dotList1
+    const DotList dotList1Ref( dotList1 );
+
+    // update the DotList by subtracting the events seen by an empty
+    // BigsetClock, which shouldn't change the DotList (since none were seen)
+    BigsetClock emptyClock;
+    ASSERT_EQ( 2, dotList1.Size() );
+    emptyClock.SubtractSeen( dotList1 );
+    ASSERT_TRUE( dotList1 == dotList1Ref );
+
+    // try again with a BigsetClock that has seen all the events in the DotList
+    // (expect the DotList to be emptied in this case)
+    BigsetClock clock; // {[{a, 2}, {b, 9}, {z, 4}], [{a, [7]}, {c, [99]}]}
+    CreateBigsetClocks( clock );
+    clock.SubtractSeen( dotList1 );
+    ASSERT_TRUE( dotList1.IsEmpty() );
+
+    // try again where the DotList has an actor present in the BigsetClock, but
+    // the associated event has not been seen by the clock
+    DotList dotList2( dotList1Ref );
+    AddToDotList( dotList2, 'z', 5 );
+    clock.SubtractSeen( dotList2 );
+    ASSERT_FALSE( dotList2.IsEmpty() );
+
+    // construct the DotList we expect to be remaining for dotList2
+    DotList dotList2Remaining;
+    AddToDotList( dotList2Remaining, 'z', 5 );
+    ASSERT_TRUE( dotList2 == dotList2Remaining );
+
+    // try again where the dot is seen in the clock's cloud rather than its VV
+    DotList dotList3;
+    AddToDotList( dotList3, 'q', 1 ); // we expect only this left after calling SubtractSeen()
+    DotList dotList3Remaining( dotList3 );
+
+    AddToDotList( dotList3, 'c', 99 ); // this should be removed by SubtractSeen()
+    clock.SubtractSeen( dotList3 );
+    ASSERT_TRUE( dotList3 == dotList3Remaining );
 }

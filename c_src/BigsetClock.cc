@@ -976,13 +976,39 @@ bool BigsetClock::Merge( const BigsetClock& That )
         if ( retVal )
         {
             // all is good so far, so compress as much as possible
-            retVal = CompressSeen();
+            CompressSeen();
         }
     }
     return retVal;
 }
 
-bool BigsetClock::CompressSeen()
+bool BigsetClock::IsSeen( const Actor& Act, Counter Event ) const
+{
+    bool isSeen = false;
+
+    // check if the caller's dot (Actor/Event) is descended by this clock's version vector
+    Counter event;
+    bool containsActor = m_VersionVector.ContainsActor( Act, &event );
+    if ( containsActor )
+    {
+        // is the caller's Event value less than or equal to the value in the VV?
+        if ( Event <= event )
+        {
+            isSeen = true;
+        }
+    }
+
+    // if the caller's dot was not seen by the VV, check for an exact match in the dot cloud
+    if ( !isSeen )
+    {
+        CounterSet events;
+        containsActor = m_DotCloud.ContainsActor( Act, &events );
+        isSeen = containsActor && (events.count( Event ) > 0);
+    }
+    return isSeen;
+}
+
+void BigsetClock::CompressSeen()
 {
     // walk through the entries in the dot cloud; for each, if the actor is in
     // the version vector, then see if we have contiguous events that can be
@@ -1052,7 +1078,23 @@ bool BigsetClock::CompressSeen()
             }
         }
     }
-    return true;
+}
+
+void BigsetClock::SubtractSeen( DotList& Dots ) const
+{
+    // walk the list of dots in the caller's DotList, removing any seen by this BigsetClock
+    std::map<Actor, Counter>& dots( Dots.m_Pairs );
+    for ( auto dotIt = dots.begin(); dotIt != dots.end(); /* dotIt advanced below */ )
+    {
+        if ( IsSeen( (*dotIt).first, (*dotIt).second ) )
+        {
+            dots.erase( dotIt++ );
+        }
+        else
+        {
+            ++dotIt;
+        }
+    }
 }
 
 } // namespace bigset

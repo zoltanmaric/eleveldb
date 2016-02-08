@@ -7,8 +7,8 @@ namespace bigset {
 void
 BigsetAccumulator::FinalizeElement()
 {
-    VersionVector remainingDots = m_CurrentContext.SubtractSeen( m_CurrentDots );
-    if ( !remainingDots.IsEmpty() )
+    m_CurrentContext.SubtractSeen( m_CurrentDots );
+    if ( !m_CurrentDots.IsEmpty() )
     {
         // this element is "in" the set locally
         m_ReadyKey    = m_CurrentElement; // TODO: transfer the buffer if possible

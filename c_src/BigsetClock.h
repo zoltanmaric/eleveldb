@@ -204,6 +204,10 @@ public:
     std::string ToString() const;
 };
 
+// a DotList is conceptually the same as a version vector: a list of 2-tuples,
+// where each 2-tuple is an actor and an event value
+typedef VersionVector DotList;
+
 ///////////////////////////////////////////////////////////////////////////////
 // DotCloud class: contains a collection of Actor/CounterSet pairs, ordered by Actor
 class DotCloud
@@ -334,18 +338,21 @@ public:
 
     ///////////////////////////////////
     // Basic Operations on a BigsetClock
+
+    // merges the caller's BigsetClock with this one, updating the version
+    // vector and dot cloud accordingly, and then calls CompressSeen()
     bool // true => merge succeeded, else false
     Merge( const BigsetClock& That );
 
-    bool // true => compression of seen dots succeeded
-    CompressSeen();
+    // returns whether or not the specified dot (actor/event) were seen by this clock
+    bool IsSeen( const Actor& Act, Counter Event ) const;
 
-    VersionVector
-    SubtractSeen( const VersionVector& /*dots*/ )
-    {
-        // TODO: fill in details: look at erlang code
-        return VersionVector();
-    }
+    // walks through the entries in the dot cloud; for each, if the actor is in
+    // the version vector, see if we have contiguous events that can be compressed
+    void CompressSeen();
+
+    // removes any dots seen by this BigsetClock from the caller's DotList
+    void SubtractSeen( DotList& Dots ) const;
 
     ///////////////////////////////////
     // Miscellaneous Methods
