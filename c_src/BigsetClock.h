@@ -18,7 +18,7 @@ typedef leveldb::Slice    Slice;
 typedef uint64_t          Counter;
 typedef std::set<Counter> CounterSet;
 
-class BigsetClock; // forward decl for friend decls
+class BigsetClock; // forward decl for friend decls; TODO: remove this if possible
 
 ///////////////////////////////////////////////////////////////////////////////
 // Actor class: represents an actor who performs an action on a bigset
@@ -137,7 +137,7 @@ class VersionVector
 {
     std::map<Actor, Counter> m_Pairs;
 
-    friend class BigsetClock;
+    friend class BigsetClock; // TODO: remove this if possible
 
 public:
     ///////////////////////////////////
@@ -210,7 +210,7 @@ class DotCloud
 {
     std::map<Actor, CounterSet> m_Dots;
 
-    friend class BigsetClock;
+    friend class BigsetClock; // TODO: remove this if possible
 
 public:
     ///////////////////////////////////

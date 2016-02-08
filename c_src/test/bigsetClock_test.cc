@@ -628,9 +628,12 @@ static void BigsetClockAddToDotCloud( BigsetClock& Clock, char ActorId, CounterS
     Clock.AddToDotCloud( actor, Events );
 }
 
-static void CreateBigsetClock( BigsetClock& Clock )
+// constructs one or more BigsetClock objects with well-known contents
+static void CreateBigsetClocks( BigsetClock& Clock, BigsetClock* pClock2 = NULL, BigsetClock* pClock3 = NULL )
 {
-    // construct Clock = {[{a, 2}, {b, 9}, {z, 4}], [{a, [7]}, {c, [99]}]}
+    // construct a BigsetClock with some stuff in its version vector and dot cloud
+    // {[{a, 2}, {b, 9}, {z, 4}], [{a, [7]}, {c, [99]}]}
+    Clock.Clear();
     BigsetClockAddToVersionVector( Clock, 'a', 2 );
     BigsetClockAddToVersionVector( Clock, 'b', 9 );
     BigsetClockAddToVersionVector( Clock, 'z', 4 );
@@ -642,13 +645,52 @@ static void CreateBigsetClock( BigsetClock& Clock )
     events.clear();
     events.insert( 99 );
     BigsetClockAddToDotCloud( Clock, 'c', events );
+
+    if ( pClock2 != NULL )
+    {
+        // construct a second BigsetClock with stuff in its dot cloud but not its VV
+        // {[], [{a, [3, 4, 5, 6]}, {d, [2]}, {z, [6]}]}
+        pClock2->Clear();
+        events.clear();
+        events.insert( 3 );
+        events.insert( 4 );
+        events.insert( 5 );
+        events.insert( 6 );
+        BigsetClockAddToDotCloud( *pClock2, 'a', events );
+
+        events.clear();
+        events.insert( 2 );
+        BigsetClockAddToDotCloud( *pClock2, 'd', events );
+
+        events.clear();
+        events.insert( 6 );
+        BigsetClockAddToDotCloud( *pClock2, 'z', events );
+    }
+
+    if ( pClock3 != NULL )
+    {
+        // construct a third BigsetClock, which is interesting to merge with 1 and 2
+        // {[{a, 5}, {c, 100}, {d, 1}], [{d, [3]}, {z, [5]}]}
+        pClock3->Clear();
+        BigsetClockAddToVersionVector( *pClock3, 'a', 5 );
+        BigsetClockAddToVersionVector( *pClock3, 'c', 100 );
+        BigsetClockAddToVersionVector( *pClock3, 'd', 1 );
+
+        events.clear();
+        events.insert( 3 );
+        BigsetClockAddToDotCloud( *pClock3, 'd', events );
+
+        events.clear();
+        events.insert( 5 );
+        BigsetClockAddToDotCloud( *pClock3, 'z', events );
+    }
 }
 
 TEST(BigsetClock, Merge_Idempotent)
 {
     // construct a BigsetClock with some stuff in its version vector and dot cloud
     BigsetClock clock1;
-    CreateBigsetClock( clock1 );
+    CreateBigsetClocks( clock1 );
 
     // save a reference copy of clock1
     const BigsetClock clock1Ref( clock1 );
@@ -663,7 +705,7 @@ TEST(BigsetClock, Merge_Identity)
 {
     // construct a BigsetClock with some stuff in its version vector and dot cloud
     BigsetClock clock1;
-    CreateBigsetClock( clock1 );
+    CreateBigsetClocks( clock1 );
 
     // save a reference copy of clock1
     const BigsetClock clock1Ref( clock1 );
@@ -682,60 +724,97 @@ TEST(BigsetClock, Merge_Identity)
     ASSERT_FALSE( clock2.IsEmpty() );
 }
 
+TEST(BigsetClock, Merge_Commutative)
+{
+    BigsetClock clock1, clock2;
+    CreateBigsetClocks( clock1, &clock2 );
+
+    // save reference copies of the clocks
+    const BigsetClock clock1Ref( clock1 ), clock2Ref( clock2 );
+
+    // merging clock2 into clock1 should produce the same result as merging clock1 into clock2
+    ASSERT_TRUE( clock1.Merge( clock2 ) );
+    BigsetClock clock3( clock1 );
+    clock1 = clock1Ref;
+
+    ASSERT_TRUE( clock2.Merge( clock1 ) );
+    ASSERT_TRUE( clock2 == clock3 );
+}
+
+TEST(BigsetClock, Merge_Associative)
+{
+    BigsetClock clock1, clock2, clock3;
+    CreateBigsetClocks( clock1, &clock2, &clock3 );
+
+    // save reference copies of the clocks
+    const BigsetClock clock1Ref( clock1 ), clock2Ref( clock2 ), clock3Ref( clock3 );
+
+    // create ((1 Merge 2) Merge 3) and compare to (1 Merge (2 Merge 3))
+
+    // merging clock2 into clock1 should produce the same result as merging clock1 into clock2
+    ASSERT_TRUE( clock1.Merge( clock2 ) );
+    ASSERT_TRUE( clock1.Merge( clock3 ) );
+    BigsetClock clock123Merged( clock1 );
+    clock1 = clock1Ref;
+
+    ASSERT_TRUE( clock2.Merge( clock3 ) );
+    ASSERT_TRUE( clock2.Merge( clock1 ) );
+    BigsetClock clock231Merged( clock2 );
+
+    ASSERT_TRUE( clock123Merged == clock231Merged );
+}
+
 TEST(BigsetClock, Merge_Concurrent)
 {
-    // construct a BigsetClock with some stuff in its version vector and dot cloud
+    // construct the clocks that we merge together
     BigsetClock clock1; // {[{a, 2}, {b, 9}, {z, 4}], [{a, [7]}, {c, [99]}]}
-    CreateBigsetClock( clock1 );
-
-    // construct a second BigsetClock with stuff in its dot cloud but not its VV
     BigsetClock clock2; // {[], [{a, [3, 4, 5, 6]}, {d, [2]}, {z, [6]}]}
+    BigsetClock clock3; // {[{a, 5}, {c, 100}, {d, 1}], [{d, [3]}, {z, [5]}]}
+    CreateBigsetClocks( clock1, &clock2, &clock3 );
+
+    // save reference versions of these clocks
+    const BigsetClock clock1Ref( clock1 ), clock2Ref( clock2 ), clock3Ref( clock3 );
+
+    // construct the expected result of merging clock1 with clock2
+    BigsetClock clock12Merged; // {[{a, 7}, {b, 9}, {z, 4}], [{c, [99]}, {d, [2]}, {z, [6]}]}
+    BigsetClockAddToVersionVector( clock12Merged, 'a', 7 );
+    BigsetClockAddToVersionVector( clock12Merged, 'b', 9 );
+    BigsetClockAddToVersionVector( clock12Merged, 'z', 4 );
+
     CounterSet events;
-    events.insert( 3 );
-    events.insert( 4 );
-    events.insert( 5 );
-    events.insert( 6 );
-    BigsetClockAddToDotCloud( clock2, 'a', events );
-
-    events.clear();
-    events.insert( 2 );
-    BigsetClockAddToDotCloud( clock2, 'd', events );
-
-    events.clear();
-    events.insert( 6 );
-    BigsetClockAddToDotCloud( clock2, 'z', events );
-
-    // construct the expected result of merging the two
-    BigsetClock clockMerged; // {[{a, 7}, {b, 9}, {z, 4}], [{c, [99]}, {d, [2]}, {z, [6]}]}
-    BigsetClockAddToVersionVector( clockMerged, 'a', 7 );
-    BigsetClockAddToVersionVector( clockMerged, 'b', 9 );
-    BigsetClockAddToVersionVector( clockMerged, 'z', 4 );
-
-    events.clear();
     events.insert( 99 );
-    BigsetClockAddToDotCloud( clockMerged, 'c', events );
+    BigsetClockAddToDotCloud( clock12Merged, 'c', events );
 
     events.clear();
     events.insert( 2 );
-    BigsetClockAddToDotCloud( clockMerged, 'd', events );
+    BigsetClockAddToDotCloud( clock12Merged, 'd', events );
 
     events.clear();
     events.insert( 6 );
-    BigsetClockAddToDotCloud( clockMerged, 'z', events );
-
-    // make reference copies of clock1/2
-    const BigsetClock clock1Ref( clock1 ), clock2Ref( clock2 );
+    BigsetClockAddToDotCloud( clock12Merged, 'z', events );
 
     // now try merging clock2 into clock1
     ASSERT_TRUE( clock1.Merge( clock2 ) );
-    ASSERT_TRUE( clock1 == clockMerged );
+    ASSERT_TRUE( clock1 == clock12Merged );
 
     // reset clock1 and try merging the other direction
     clock1 = clock1Ref;
     ASSERT_TRUE( clock1 == clock1Ref );
     ASSERT_TRUE( clock2 == clock2Ref );
-    ASSERT_TRUE( clock1 != clockMerged ); // just for good measure
+    ASSERT_TRUE( clock1 != clock12Merged ); // just for good measure
 
     ASSERT_TRUE( clock2.Merge( clock1 ) );
-    ASSERT_TRUE( clock2 == clockMerged );
+    ASSERT_TRUE( clock2 == clock12Merged );
+
+    // construct the expected result of merging clock12Merged with clock3
+    BigsetClock clock123Merged; // {[{a, 7}, {b, 9}, {c, 100}, {d, 3}, {z, 6}], []}
+    BigsetClockAddToVersionVector( clock123Merged, 'a', 7 );
+    BigsetClockAddToVersionVector( clock123Merged, 'b', 9 );
+    BigsetClockAddToVersionVector( clock123Merged, 'c', 100 );
+    BigsetClockAddToVersionVector( clock123Merged, 'd', 3 );
+    BigsetClockAddToVersionVector( clock123Merged, 'z', 6 );
+
+    // now merge clock12Merged into clock3
+    ASSERT_TRUE( clock3.Merge( clock12Merged ) );
+    ASSERT_TRUE( clock3 == clock123Merged );
 }
