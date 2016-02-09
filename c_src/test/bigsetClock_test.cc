@@ -294,6 +294,135 @@ TEST(VersionVector, Compare)
     ASSERT_TRUE( vv1 < vv2 );
 }
 
+TEST(VersionVector, ToBinaryValue_Empty)
+{
+    // expected binary format of "[]" is <<131,106>>
+    const char* expectedBinaryValue = "\x83\x6a";
+    const size_t expectedBinarySizeInBytes = 2;
+
+    VersionVector vvEmpty;
+    basho::bigset::Buffer vvBuff;
+    ASSERT_TRUE( vvEmpty.ToBinaryValue( vvBuff ) );
+    ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
+    ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
+}
+
+TEST(VersionVector, ToBinaryValue_SinglePair)
+{
+    // test with a small (<255) event value for a single actor
+
+    // expected binary format of "[{<<31,124,79,82,56,248,49,176>>,3}]"
+    // is <<131,108,0,0,0,1,104,2,109,0,0,0,8,31,124,79,82,56,248,49,176,97,3,106>>
+    const char* expectedBinaryValue = "\x83\x6c\x00\x00\x00\x01"
+                                      "\x68\x02\x6d\x00\x00\x00\x08\x1f\x7c\x4f\x52\x38\xf8\x31\xb0\x61\x03"
+                                      "\x6a";
+    const size_t expectedBinarySizeInBytes = 24;
+
+    char actorId[8];
+    actorId[0] = (char)31, actorId[1] = (char)124, actorId[2] = (char)79, actorId[3] = (char)82;
+    actorId[4] = (char)56, actorId[5] = (char)248, actorId[6] = (char)49, actorId[7] = (char)176;
+    Slice actorIdSlice( actorId, sizeof actorId );
+    Actor actor( actorIdSlice );
+
+    VersionVector vv;
+    vv.AddPair( actor, 3 );
+
+    basho::bigset::Buffer vvBuff;
+    ASSERT_TRUE( vv.ToBinaryValue( vvBuff ) );
+    ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
+    ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
+}
+
+TEST(VersionVector, ToBinaryValue_TwoPairs)
+{
+    // test with multiple actors and small (<255) event values
+
+    // expected binary format of "[{<<33,240,159,213,154,205,244,148>>,2},{<<215,98,38,119,186,244,52,94>>,5}]"
+    // is <<131,108,0,0,0,2,104,2,109,0,0,0,8,33,240,159,213,154,205,244,148,97,2,104,2,109,0,0,0,8,215,98,38,119,186,244,52,94,97,5,106>>
+    const char* expectedBinaryValue = "\x83\x6c\x00\x00\x00\x02"
+                                      "\x68\x02\x6d\x00\x00\x00\x08\x21\xf0\x9f\xd5\x9a\xcd\xf4\x94\x61\x02"
+                                      "\x68\x02\x6d\x00\x00\x00\x08\xd7\x62\x26\x77\xba\xf4\x34\x5e\x61\x05"
+                                      "\x6a";
+    const size_t expectedBinarySizeInBytes = 41;
+
+    char actorId[8];
+    actorId[0] = (char)33, actorId[1] = (char)240, actorId[2] = (char)159, actorId[3] = (char)213;
+    actorId[4] = (char)154, actorId[5] = (char)205, actorId[6] = (char)244, actorId[7] = (char)148;
+    Slice actorIdSlice( actorId, sizeof actorId );
+    Actor actor( actorIdSlice );
+
+    VersionVector vv;
+    vv.AddPair( actor, 2 );
+
+    actorId[0] = (char)215, actorId[1] = (char)98, actorId[2] = (char)38, actorId[3] = (char)119;
+    actorId[4] = (char)186, actorId[5] = (char)244, actorId[6] = (char)52, actorId[7] = (char)94;
+    actor.SetId( actorIdSlice );
+    vv.AddPair( actor, 5 );
+
+    basho::bigset::Buffer vvBuff;
+    ASSERT_TRUE( vv.ToBinaryValue( vvBuff ) );
+    ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
+    ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
+}
+
+TEST(VersionVector, ToBinaryValue_LargeEvent)
+{
+    // test with a large (>255 but fits in 32-bits) event value for a single actor
+
+    // expected binary format of "[{<<31,124,79,82,56,248,49,176>>,3001}]"
+    // is <<131,108,0,0,0,1,104,2,109,0,0,0,8,31,124,79,82,56,248,49,176,98,0,0,11,185,106>>
+    const char* expectedBinaryValue = "\x83\x6c\x00\x00\x00\x01"
+                                      "\x68\x02\x6d\x00\x00\x00\x08\x1f\x7c\x4f\x52\x38\xf8\x31\xb0\x62\x00\x00\x0b\xb9"
+                                      "\x6a";
+    const size_t expectedBinarySizeInBytes = 27;
+
+    char actorId[8];
+    actorId[0] = (char)31, actorId[1] = (char)124, actorId[2] = (char)79, actorId[3] = (char)82;
+    actorId[4] = (char)56, actorId[5] = (char)248, actorId[6] = (char)49, actorId[7] = (char)176;
+    Slice actorIdSlice( actorId, sizeof actorId );
+    Actor actor( actorIdSlice );
+
+    VersionVector vv;
+    vv.AddPair( actor, 3001 );
+
+    basho::bigset::Buffer vvBuff;
+    ASSERT_TRUE( vv.ToBinaryValue( vvBuff ) );
+    ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
+    ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
+}
+
+TEST(VersionVector, ToBinaryValue_BignumEvent)
+{
+    // test with a bignum (too large to fit in 32-bits) event value for a single actor
+
+    // expected binary format of "[{<<31,124,79,82,56,248,49,176>>,8078839158},{<<215,98,38,119,186,244,52,94>>,18446744073709551615}]"
+    // is <<131,108,0,0,0,2,104,2,109,0,0,0,8,31,124,79,82,56,248,49,176,110,5,0,118,77,137,225,1,104,2,109,0,0,0,8,215,98,38,119,186,244,52,94,110,8,0,255,255,255,255,255,255,255,255,106>>
+    const char* expectedBinaryValue = "\x83\x6c\x00\x00\x00\x02"
+                                      "\x68\x02\x6d\x00\x00\x00\x08\x1f\x7c\x4f\x52\x38\xf8\x31\xb0\x6e\x05\x00\x76\x4d\x89\xe1\x01"
+                                      "\x68\x02\x6d\x00\x00\x00\x08\xd7\x62\x26\x77\xba\xf4\x34\x5e\x6e\x08\x00\xff\xff\xff\xff\xff\xff\xff\xff"
+                                      "\x6a";
+    const size_t expectedBinarySizeInBytes = 56;
+
+    char actorId[8];
+    actorId[0] = (char)31, actorId[1] = (char)124, actorId[2] = (char)79, actorId[3] = (char)82;
+    actorId[4] = (char)56, actorId[5] = (char)248, actorId[6] = (char)49, actorId[7] = (char)176;
+    Slice actorIdSlice( actorId, sizeof actorId );
+    Actor actor( actorIdSlice );
+
+    VersionVector vv;
+    vv.AddPair( actor, 8078839158 );
+
+    actorId[0] = (char)215, actorId[1] = (char)98, actorId[2] = (char)38, actorId[3] = (char)119;
+    actorId[4] = (char)186, actorId[5] = (char)244, actorId[6] = (char)52, actorId[7] = (char)94;
+    actor.SetId( actorIdSlice );
+    vv.AddPair( actor, 18446744073709551615ull );
+
+    basho::bigset::Buffer vvBuff;
+    ASSERT_TRUE( vv.ToBinaryValue( vvBuff ) );
+    ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
+    ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // DotCloud class unit tests
 

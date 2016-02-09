@@ -150,6 +150,180 @@ int VersionVector::Compare( const VersionVector& That ) const
     return retVal;
 }
 
+static bool FormatBigEndianUint32( uint32_t Value, char* pBuff, size_t BuffSizeInBytes )
+{
+    if ( BuffSizeInBytes < 4 )
+    {
+        return false;
+    }
+
+    // TODO: deal with running on a big-endian system
+    union
+    {
+        uint32_t m_Uint32;
+        char     m_Bytes[4];
+    } value;
+
+    value.m_Uint32 = Value;
+
+    pBuff[0] = value.m_Bytes[3];
+    pBuff[1] = value.m_Bytes[2];
+    pBuff[2] = value.m_Bytes[1];
+    pBuff[3] = value.m_Bytes[0];
+    return true;
+}
+
+static bool WriteActorToBinaryValue( const Actor& Act, Buffer& Value )
+{
+    // we write the Actor ID to the provided Buffer in Erlang External Term
+    // Format as a binary value (record ID byte 109 followed by the length of
+    // the binary byte stream (as an unsigned 4 byte integer in big-endian
+    // format) followed by the bytes of the Actor ID
+    char binaryHeader[5];
+    binaryHeader[0] = (char)109;
+
+    size_t actorIdSize = Actor::GetActorIdSizeInBytes();
+    if (   actorIdSize > 0xffffffff
+        || !FormatBigEndianUint32( (uint32_t)actorIdSize, binaryHeader + 1, sizeof binaryHeader - 1 )
+        || !Value.Append( binaryHeader, sizeof binaryHeader ) )
+    {
+        return false;
+    }
+    return Act.AppendActorIdToBuffer( Value );
+}
+
+static bool WriteCounterToBinaryValue( Counter Event, Buffer& Value )
+{
+    // we write the Counter value to the provided Buffer in Erlang External
+    // Term Format; the exact format depends on the size of the value
+    if ( Event <= 0xff )
+    {
+        // the value fits in a byte, so we can write a "small integer", which
+        // is an unsigned 8-bit integer
+        char smallInt[2];
+        smallInt[0] = (char)97;
+        smallInt[1] = (char)Event;
+        return Value.Append( smallInt, sizeof smallInt );
+    }
+    else if ( Event <= 0x7fffffff )
+    {
+        // we have a value that fits in 32-bits, so we write a regular integer,
+        // which is a signed 32-bit value in big-endian format
+        char largeInt[5];
+        largeInt[0] = (char)98;
+        if ( FormatBigEndianUint32( (uint32_t)Event, largeInt + 1, sizeof largeInt - 1 ) )
+        {
+            return Value.Append( largeInt, sizeof largeInt );
+        }
+    }
+    else
+    {
+        // we have an unsigned value that won't fit in a 32-bit signed integer,
+        // so we write it as a "small bignum", which is formatted as a record
+        // ID byte (110) followed by a byte containing the number of digits,
+        // followed by a sign byte, followed by the digits with the LSB byte
+        // stored first
+        char bignumInt[11]; // 3 bytes (record ID, byte count, sign) + up to 8 bytes
+        bignumInt[0] = (char)110;
+        // bignumInt[1] = ? - we fill in the byte count after we determine it below
+        bignumInt[2] = 0; // sign byte; 0 => positive
+
+        int byteCount = 0;
+        while ( Event > 0 )
+        {
+            if ( ++byteCount > 8 )
+            {
+                // TODO: log an error?
+                return false;
+            }
+            bignumInt[ byteCount + 2 ] = (char)(Event & 0xff);
+            Event /= 256;
+        }
+
+        // now that we know the number of digits, set it in the bignumInt array
+        bignumInt[1] = (char)byteCount;
+        return Value.Append( bignumInt, byteCount + 3 );
+    }
+    return false;
+}
+
+bool VersionVector::ToBinaryValue( Buffer& Value ) const
+{
+    // we write this VersionVector to the caller's Buffer in the Erlang External
+    // Term Format specified at http://erlang.org/doc/apps/erts/erl_ext_dist.html;
+    // specifically, we write it as a list of 0 or more 2-tuples of the form:
+    //
+    //      [{Actor :: binary(8), Count :: pos_integer()}]
+
+    // initialize the caller's Buffer to be empty
+    Value.SetBytesUsed( 0 );
+
+    // TODO: all the hard-coded stuff below (probably) needs to be replaced with calls into the Erlang ei library
+
+    // first we add the External Term Format magic number
+    char byteToAdd = (char)131;
+    if ( !Value.Append( &byteToAdd, 1 ) )
+    {
+        return false;
+    }
+
+    // append the actor/event pairs from the version vector
+    size_t pairCount = m_Pairs.size();
+    if ( pairCount > 0 )
+    {
+        // we are writing an Erlang list, which has the External Term Format
+        //
+        //      |1  |4     |        |    |
+        //      |108|Length|Elements|Tail|
+        //
+        // and each Element is a 2-tuple whose first term is the actor Id (8-byte
+        // binary term), and whose second term is the count integer; the Length
+        // is an unsigned 4 byte integer in big-endian format
+
+        // first we add the list record ID byte
+        byteToAdd = (char)108;
+        if ( !Value.Append( &byteToAdd, 1 ) )
+        {
+            return false;
+        }
+
+        // now add the number of terms in the list
+        char lengthBytes[4];
+        if (   pairCount > 0xffffffff
+            || !FormatBigEndianUint32( (uint32_t)pairCount, lengthBytes, sizeof lengthBytes )
+            || !Value.Append( lengthBytes, sizeof lengthBytes ) )
+        {
+            return false;
+        }
+
+        // now add the 2-tuples of the form {Actor :: binary(8), Count :: pos_integer()}
+        for ( auto pairIt = m_Pairs.begin(); pairIt != m_Pairs.end(); ++pairIt )
+        {
+            // write the tuple record ID byte (104) followed by the tuple's arity (2)
+            char tuple[2];
+            tuple[0] = (char)104;
+            tuple[1] = (char)2;
+            if ( !Value.Append( tuple, 2 ) )
+            {
+                return false;
+            }
+
+            if ( !WriteActorToBinaryValue( (*pairIt).first, Value ) )
+            {
+                return false;
+            }
+            if ( !WriteCounterToBinaryValue( (*pairIt).second, Value ) )
+            {
+                return false;
+            }
+        }
+    }
+
+    // append a final empty list, to make this a well-formed Erlang list (every list requires a tail element)
+    byteToAdd = (char)106; // empty list record ID
+    return Value.Append( &byteToAdd, 1 );;
+}
+
 std::string VersionVector::ToString() const
 {
     std::stringstream versionVectorStr;

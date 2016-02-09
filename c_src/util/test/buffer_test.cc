@@ -16,13 +16,13 @@ TEST(Buffer, Ctor)
     ASSERT_EQ( BUILTIN_BUFF_SIZE, buff1.GetBuffSize() );
     ASSERT_EQ( BUILTIN_BUFF_SIZE, buff1.GetBuiltinBuffSize() );
 
-    // ctor parameter specifies size smaller than builtin buffer (will use builtin buffer)
+    // ctor parameter specifies size smaller than built-in buffer (will use built-in buffer)
     const size_t SMALLER_BUFF_SIZE = BUILTIN_BUFF_SIZE - 1;
     Buffer<BUILTIN_BUFF_SIZE> buff2( SMALLER_BUFF_SIZE );
     ASSERT_EQ( BUILTIN_BUFF_SIZE, buff2.GetBuffSize() );
     ASSERT_EQ( BUILTIN_BUFF_SIZE, buff2.GetBuiltinBuffSize() );
 
-    // ctor parameter specifies size larger than builtin buffer (will use allocated buffer)
+    // ctor parameter specifies size larger than built-in buffer (will use allocated buffer)
     const size_t LARGER_BUFF_SIZE = BUILTIN_BUFF_SIZE + 1;
     Buffer<BUILTIN_BUFF_SIZE> buff3( LARGER_BUFF_SIZE );
     ASSERT_EQ( LARGER_BUFF_SIZE,  buff3.GetBuffSize() );
@@ -117,7 +117,7 @@ TEST(Buffer, EnsureSize)
 
 TEST(Buffer, ReallocGranularity)
 {
-    // with a small (less than 1024) builtin buffer, the realloc granularity matches the size of the builtin buffer
+    // with a small (less than 1024) built-in buffer, the realloc granularity matches the size of the built-in buffer
     const size_t BUILTIN_BUFF_SIZE_SMALL = 10;
 
     Buffer<BUILTIN_BUFF_SIZE_SMALL> buffSmall;
@@ -133,7 +133,7 @@ TEST(Buffer, ReallocGranularity)
     ASSERT_TRUE( buffSmall.EnsureSize( largeRealloc ) );
     ASSERT_EQ( largeRealloc, buffSmall.GetBuffSize() );
 
-    // with a large (greater than 1024) builtin buffer, the realloc granularity maxes out at 1024
+    // with a large (greater than 1024) built-in buffer, the realloc granularity maxes out at 1024
     const size_t BUILTIN_BUFF_SIZE_LARGE = 2048;
 
     Buffer<BUILTIN_BUFF_SIZE_LARGE> buffLarge;
@@ -150,7 +150,7 @@ TEST(Buffer, ReallocGranularity)
     ASSERT_EQ( largeRealloc, buffLarge.GetBuffSize() );
 }
 
-TEST(Buffer, ContentTest)
+TEST(Buffer, Contents)
 {
     // create a buffer and fill it with some stuff, then realloc and add some more stuff
     const size_t BUILTIN_BUFF_SIZE = 100;
@@ -217,7 +217,7 @@ TEST(Buffer, ContentTest)
     ASSERT_EQ( newBuffSize, j );
 }
 
-TEST(Buffer, BytesUsedTest)
+TEST(Buffer, BytesUsed)
 {
     const size_t BUILTIN_BUFF_SIZE = 100;
 
@@ -248,7 +248,7 @@ TEST(Buffer, BytesUsedTest)
     ASSERT_EQ( BUILTIN_BUFF_SIZE + 1, buff.GetBytesUsed() );
 }
 
-TEST(Buffer, BytesUsedErrorTest)
+TEST(Buffer, BytesUsedError)
 {
     const size_t BUILTIN_BUFF_SIZE = 100;
     Buffer<BUILTIN_BUFF_SIZE> buff;
@@ -258,7 +258,7 @@ TEST(Buffer, BytesUsedErrorTest)
     ASSERT_THROW( buff.SetBytesUsed( BUILTIN_BUFF_SIZE + 1 ), std::logic_error );
 }
 
-TEST(Buffer, AssignTest)
+TEST(Buffer, Assign)
 {
     // set up some data we can assign to the buffer
     std::string dataStr( "This is some data in a string. Let's put a bit more stuff in here." );
@@ -293,6 +293,107 @@ TEST(Buffer, AssignTest)
     ASSERT_EQ( sizeof dataBuff, buff.GetBytesUsed() );
     pBuff = buff.GetCharBuffer();
     for ( j = 0; j < buff.GetBytesUsed(); ++j )
+    {
+        ASSERT_EQ( (char)j, pBuff[j] );
+    }
+}
+
+TEST(Buffer, AssignAndTransfer)
+{
+    // test the overload of Buffer::Assign() that (optionally) transfers
+    // ownership of the allocated buffer
+
+    // set up some data we can assign to the buffers
+    std::string dataStr( "This is some data in a string. Let's put a bit more stuff in here." );
+
+    ///////////////////////////////////
+    // first we call Buffer::Assign() where we're using the built-in buffer
+    Buffer<10> buff1, buff2;
+
+    size_t bytesToAssign = buff1.GetBuiltinBuffSize();
+    ASSERT_TRUE( bytesToAssign < dataStr.size() );
+    ASSERT_TRUE( buff1.Assign( dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( 0, ::memcmp( buff1.GetCharBuffer(), dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( bytesToAssign, buff1.GetBytesUsed() );
+
+    void* pBuff1Builtin = buff1.GetBuffer(); // this should be the built-in buffer for buff1
+
+    // first we assign buff1 to buff2 without transferring ownership
+    ASSERT_TRUE( buff2.Assign( buff1, false ) );
+    ASSERT_EQ( 0, ::memcmp( buff2.GetCharBuffer(), dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( bytesToAssign, buff2.GetBytesUsed() );
+    ASSERT_TRUE( pBuff1Builtin != buff2.GetBuffer() ); // ensure we didn't transfer the built-in buffer
+
+    // buff1 should still contain the original data
+    ASSERT_EQ( 0, ::memcmp( buff1.GetCharBuffer(), dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( bytesToAssign, buff1.GetBytesUsed() );
+    ASSERT_TRUE( pBuff1Builtin == buff1.GetBuffer() ); // ensure our built-in buffer is, well, still built-in
+
+    // now assign buff1 to buff2 and transfer ownership
+    buff2.ResetBuffer();
+    ASSERT_TRUE( buff2.Assign( buff1, true ) );
+    ASSERT_EQ( 0, ::memcmp( buff2.GetCharBuffer(), dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( bytesToAssign, buff2.GetBytesUsed() );
+
+    // buff1 should be empty (although it may still contain the bytes, since we were using the built-in buffer)
+    ASSERT_EQ( 0, buff1.GetBytesUsed() );
+    ASSERT_TRUE( pBuff1Builtin == buff1.GetBuffer() );
+
+    ///////////////////////////////////
+    // now we call Buffer::Assign() where we're using an allocated buffer
+    bytesToAssign = dataStr.size();
+    ASSERT_TRUE( bytesToAssign > buff1.GetBuiltinBuffSize() );
+    ASSERT_TRUE( buff1.Assign( dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( 0, ::memcmp( buff1.GetCharBuffer(), dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( bytesToAssign, buff1.GetBytesUsed() );
+
+    void* pBuff1Allocated = buff1.GetBuffer(); // this should not be the built-in buffer for buff1
+    ASSERT_TRUE( pBuff1Allocated != pBuff1Builtin );
+
+    // first we assign buff1 to buff2 without transferring ownership
+    ASSERT_TRUE( buff2.Assign( buff1, false ) );
+    ASSERT_EQ( 0, ::memcmp( buff2.GetCharBuffer(), dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( bytesToAssign, buff2.GetBytesUsed() );
+
+    // buff1 should still contain the original data
+    ASSERT_EQ( 0, ::memcmp( buff1.GetCharBuffer(), dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( bytesToAssign, buff1.GetBytesUsed() );
+    ASSERT_TRUE( pBuff1Allocated == buff1.GetBuffer() );
+
+    // now assign buff1 to buff2 and transfer ownership
+    buff2.ResetBuffer();
+    ASSERT_TRUE( buff2.Assign( buff1, true ) );
+    ASSERT_EQ( 0, ::memcmp( buff2.GetCharBuffer(), dataStr.c_str(), bytesToAssign ) );
+    ASSERT_EQ( bytesToAssign, buff2.GetBytesUsed() );
+
+    // buff1 should be empty and it should now be using its built-in buffer
+    ASSERT_EQ( 0, buff1.GetBytesUsed() );
+    ASSERT_TRUE( pBuff1Builtin == buff1.GetBuffer() );
+}
+
+TEST(Buffer, Append)
+{
+    // set up some data we can append to the buffer
+    char dataBuff[ 1000 ];
+    int j;
+    for ( j = 0; j < sizeof dataBuff; ++j )
+    {
+        dataBuff[j] = (char)j;
+    }
+
+    // now create a Buffer, append the data to it in chunks, and check the contents
+    Buffer<100> buff;
+
+    int chunkSize = 50; // pick something smaller than the size of the built-in buffer and that evenly divides sizeof( dataBuff ), just to make life easy
+    int chunkCount = sizeof dataBuff / chunkSize;
+    for ( j = 0; j < chunkCount; ++j )
+    {
+        ASSERT_TRUE( buff.Append( dataBuff + (j * chunkSize), chunkSize ) );
+    }
+
+    ASSERT_EQ( sizeof dataBuff, buff.GetBytesUsed() );
+    const char* pBuff = buff.GetCharBuffer();
+    for ( j = 0; j < sizeof dataBuff; ++j )
     {
         ASSERT_EQ( (char)j, pBuff[j] );
     }

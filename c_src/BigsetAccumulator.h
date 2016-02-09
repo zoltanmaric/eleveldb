@@ -8,7 +8,6 @@
 #include <list>
 
 #include "BigsetClock.h"
-#include "util/buffer.h"
 
 namespace basho {
 namespace bigset {
@@ -16,19 +15,17 @@ namespace bigset {
 class BigsetAccumulator
 {
 private:
-    typedef utils::Buffer<32> Buffer;
+    Actor       m_ThisActor;
+    Buffer      m_CurrentSetName;
+    Buffer      m_CurrentElement;
+    BigsetClock m_CurrentContext;
+    DotList     m_CurrentDots;
 
-    Actor         m_ThisActor;
-    Buffer        m_CurrentSetName;
-    Buffer        m_CurrentElement;
-    BigsetClock   m_CurrentContext;
-    VersionVector m_CurrentDots;
-
-    Buffer        m_ReadyKey;
-    Buffer        m_ReadyValue;
-    bool          m_ElementReady;
-    bool          m_ActorClockReady;
-    bool          m_ActorClockSeen;
+    Buffer      m_ReadyKey;
+    Buffer      m_ReadyValue;
+    bool        m_ElementReady;
+    bool        m_ActorClockReady;
+    bool        m_ActorClockSeen;
 
     void FinalizeElement();
 

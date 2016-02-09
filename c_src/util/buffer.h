@@ -141,11 +141,14 @@ public:
                 // preserve the old buffer's contents
                 ::memcpy( pNewBuff, m_pBuff, m_BuffSize );
 
-                // clean up any previously-allocated resources
+                // clean up any previously-allocated resources (but we need to preserve m_BytesUsed)
+                size_t bytesUsedSave = m_BytesUsed;
                 ResetBuffer();
 
-                m_pBuff = pNewBuff;
-                m_BuffSize = NewSize;
+                m_pBuff     = pNewBuff;
+                m_BuffSize  = NewSize;
+                m_BytesUsed = bytesUsedSave;
+
                 if ( pRealloc != NULL )
                 {
                     *pRealloc = true;
@@ -194,12 +197,10 @@ public:
     bool IsEmpty() const { return m_BytesUsed == 0; }
 
     ///////////////////////////////////
-    // Assignment Methods
+    // Assignment/Append Methods
     //
     // NOTE: These return true on success and false on failure (typically due
     // to an allocation failure).
-    //
-    // TODO: Write an override of Assign() that transfers ownership of an allocated buffer
     bool Assign( const char* pData, size_t SizeInBytes )
     {
         if ( !EnsureSize( SizeInBytes ) )
@@ -214,6 +215,62 @@ public:
     bool Assign( const Slice& Data )
     {
         return Assign( Data.data(), Data.size() );
+    }
+
+    // override of Assign() that transfers the buffer from another Buffer, avoiding a realloc
+    //
+    // NOTE: if the TransferOwnership parameter is true, the contents of the
+    // source Buffer object are reset
+    bool Assign( Buffer& That, bool TransferOwnership )
+    {
+        bool retVal = true;
+        if ( this != &That )
+        {
+            if ( TransferOwnership && (That.m_pBuff != That.m_Buffer) )
+            {
+                // That is not using its built-in buffer, so transfer the allocated buffer to this object
+                ResetBuffer();
+                m_pBuff     = That.m_pBuff;
+                m_BuffSize  = That.m_BuffSize;
+                m_BytesUsed = That.m_BytesUsed;
+
+                // set That.m_pBuff to NULL, so that the buffer isn't freed when we call That.Reset() below
+                That.m_pBuff = NULL;
+            }
+            else
+            {
+                retVal = Assign( That.GetCharBuffer(), That.GetBytesUsed() );
+            }
+
+            // if we are transferring ownership of the buffer, reset That
+            if ( TransferOwnership )
+            {
+                That.ResetBuffer();
+            }
+        }
+        return retVal;
+    }
+
+    // appends bytes to the end of this buffer; the end is determined by the BytesUsed value
+    bool Append( const char* pBytesToAppend, size_t Size )
+    {
+        // ensure we have something to do
+        if ( NULL == pBytesToAppend || 0 == Size )
+        {
+            return true;
+        }
+
+        // ensure our buffer is large enough for the additional bytes
+        size_t sizeNeeded = m_BytesUsed + Size;
+        if ( !EnsureSize( sizeNeeded ) )
+        {
+            return false;
+        }
+
+        // now copy the caller's data to the buffer after the current data
+        ::memcpy( m_pBuff + m_BytesUsed, pBytesToAppend, Size );
+        m_BytesUsed += Size;
+        return true;
     }
 
     ///////////////////////////////////

@@ -11,13 +11,21 @@ BigsetAccumulator::FinalizeElement()
     if ( !m_CurrentDots.IsEmpty() )
     {
         // this element is "in" the set locally
-        m_ReadyKey    = m_CurrentElement; // TODO: transfer the buffer if possible
-        //m_ReadyValue  = remainingDots.ToValue(); // TODO: format is term_to_binary() formatted list of 2-tuples {actor,integer}
+        if ( !m_ReadyKey.Assign( m_CurrentElement, true ) ) // true => transfer ownership of the buffer from m_CurrentElement to m_ReadyKey
+        {
+            // TODO: log an error that buffer assignment failed
+            throw std::runtime_error( "Failed to assign current element to ready key" );
+        }
+        if ( !m_CurrentDots.ToBinaryValue( m_ReadyValue ) )
+        {
+            // TODO: log an error that outputting the dot list failed
+            throw std::runtime_error( "Failed to assign current dots to ready value" );
+        }
         m_ElementReady = true;
-
-        m_CurrentContext.Clear();
-        m_CurrentDots.Clear();
     }
+    m_CurrentElement.ResetBuffer();
+    m_CurrentContext.Clear();
+    m_CurrentDots.Clear();
 }
 
 // adds the current record to the accumulator
@@ -33,7 +41,11 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
         if ( m_CurrentSetName.IsEmpty() )
         {
             // this is the first record for this bigset, so save the set's name
-            m_CurrentSetName.Assign( setName );
+            if ( !m_CurrentSetName.Assign( setName ) )
+            {
+                // TODO: log an error that buffer assignment failed
+                throw std::runtime_error( "Failed to assign current set name" );
+            }
         }
         else if ( m_CurrentSetName != setName )
         {
@@ -79,7 +91,11 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
             // accumulate values
             if ( m_CurrentElement.IsEmpty() )
             {
-                m_CurrentElement.Assign( element );
+                if ( !m_CurrentElement.Assign( element ) )
+                {
+                    // TODO: log an error that buffer assignment failed
+                    throw std::runtime_error( "Failed to assign current element" );
+                }
             }
 
             BigsetClock currentClock;
@@ -89,7 +105,11 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                 // TODO: log an error about converting value to a bigset clock
                 throw std::runtime_error( "Unable to convert binary to bigset clock" );
             }
-            m_CurrentContext.Merge( currentClock );
+            if ( !m_CurrentContext.Merge( currentClock ) )
+            {
+                // TODO: log an error about merging bigset clocks
+                throw std::runtime_error( "Unable to merge bigset clocks" );
+            }
 
             Actor actor;
             if ( !actor.SetId( keyToAdd.GetActor() ) )

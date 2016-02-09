@@ -10,6 +10,7 @@
 #include <string>
 #include <stdexcept>
 #include <leveldb/slice.h>
+#include "util/buffer.h"
 
 namespace basho {
 namespace bigset {
@@ -17,6 +18,7 @@ namespace bigset {
 typedef leveldb::Slice    Slice;
 typedef uint64_t          Counter;
 typedef std::set<Counter> CounterSet;
+typedef utils::Buffer<32> Buffer;
 
 class BigsetClock; // forward decl for friend decls; TODO: remove this if possible
 
@@ -126,6 +128,12 @@ public:
     // returns the Actor as a string, in Erlang term format
     std::string ToString() const;
 
+    // appends the bytes of this Actor ID to the caller's Buffer
+    bool AppendActorIdToBuffer( Buffer& Value ) const
+    {
+        return Value.Append( m_ID, ActorIdSizeInBytes );
+    }
+
     // returns the size of an Actor ID in bytes
     static size_t
     GetActorIdSizeInBytes() { return ActorIdSizeInBytes; }
@@ -199,6 +207,10 @@ public:
     // vector; if the Actor is present, optionally returns the Counter for
     // the Actor
     bool ContainsActor( const Actor& Act, Counter* pEvent = NULL ) const;
+
+    // formats the VersionVector in Erlang term_to_binary() format, placing
+    // the bytes in the caller's Buffer
+    bool ToBinaryValue( Buffer& Value ) const;
 
     // returns the VersionVector as a string, in Erlang term format
     std::string ToString() const;
