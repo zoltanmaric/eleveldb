@@ -55,10 +55,10 @@ public:
     {
         if ( m_ElementReady )
         {
-            Slice readyKey( m_ReadyKey.GetCharBuffer(), m_ReadyKey.GetBuffSize() );
+            Slice readyKey( m_ReadyKey.GetCharBuffer(), m_ReadyKey.GetBytesUsed() );
             key = readyKey;
 
-            Slice readyValue( m_ReadyValue.GetCharBuffer(), m_ReadyValue.GetBuffSize() );
+            Slice readyValue( m_ReadyValue.GetCharBuffer(), m_ReadyValue.GetBytesUsed() );
             value = readyValue;
 
             m_ElementReady = false; // prepare for the next element
