@@ -21,6 +21,8 @@
 // -------------------------------------------------------------------
 
 #include <syslog.h>
+#include <leveldb/env.h>
+#include "util/stringUtils.h"
 
 #ifndef __ELEVELDB_DETAIL_HPP
     #include "detail.hpp"
@@ -939,6 +941,11 @@ public:
  */
 work_result RangeScanTask::operator()()
 {
+    // set up to log some diagnostic info
+    leveldb::Env* pEnv = leveldb::Env::Default();
+    uint64_t startMicros = (NULL == pEnv) ? 0 : pEnv->NowMicros();
+    uint64_t recordsConsidered = 0, recordsReturned = 0, bytesReturned = 0;
+
     ErlNifEnv* env     = local_env_;
     ErlNifEnv* msg_env = enif_alloc_env();
     ErlNifEnvFreeHelper msgEnvFreeHelper( msg_env ); // ensure we free this
@@ -1000,6 +1007,7 @@ work_result RangeScanTask::operator()()
 
                 send_streaming_batch(&pid, msg_env, caller_ref_term, &bin);
                 out_offset = 0;
+                bytesReturned += bin.size;
             }
 
             break;
@@ -1012,6 +1020,7 @@ work_result RangeScanTask::operator()()
         // which will cause all keys to be returned
         //------------------------------------------------------------
 
+        ++recordsConsidered;
         leveldb::Slice key   = iter->key();
         leveldb::Slice value = iter->value();
 
@@ -1101,7 +1110,9 @@ work_result RangeScanTask::operator()()
         }
         
         if (filter_passed) {
-	  
+
+            ++recordsReturned;
+
             const size_t ksz = key.size();
             const size_t vsz = value.size();
 
@@ -1152,6 +1163,7 @@ work_result RangeScanTask::operator()()
                 sync_obj_->AddBytes(out_offset);
 
                 out_offset = 0;
+                bytesReturned += bin.size;
 	        }
 
     	    //------------------------------------------------------------
@@ -1177,6 +1189,19 @@ work_result RangeScanTask::operator()()
 
     if(out_offset)
         enif_release_binary(&bin);
+
+    if ( startMicros > 0 )
+    {
+        uint64_t elapsedMicros = pEnv->NowMicros() - startMicros;
+        std::string elapsedMicrosStr     = basho::utils::FormatIntAsString( elapsedMicros );
+        std::string recordsConsideredStr = basho::utils::FormatIntAsString( recordsConsidered );
+        std::string recordsReturnedStr   = basho::utils::FormatIntAsString( recordsReturned );
+        std::string bytesReturnedStr     = basho::utils::FormatSizeAsString( bytesReturned, true );
+        leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                      "RangeScanTask: streaming fold took %s microsecs; records considered=%s, returned=%s; size returned=%s",
+                      elapsedMicrosStr.c_str(), recordsConsideredStr.c_str(),
+                      recordsReturnedStr.c_str(), bytesReturnedStr.c_str() );
+    }
 
     return work_result();
 
