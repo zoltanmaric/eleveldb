@@ -65,7 +65,7 @@ bool VersionVector::AddPair( const Actor& Act, Counter Event, bool IsTombstone )
     bool retVal = false;
     if ( !IsTombstone )
     {
-        auto result = m_Pairs.insert( std::pair<Actor, Counter>( Act, Event ) );
+        std::pair<ActorToCounterMapIterator, bool> result = m_Pairs.insert( std::pair<Actor, Counter>( Act, Event ) );
         retVal = result.second;
         if ( !retVal )
         {
@@ -85,7 +85,7 @@ bool VersionVector::Merge( const VersionVector& That )
 {
     if ( this != &That )
     {
-        for ( auto vvIt = That.m_Pairs.begin(); vvIt != That.m_Pairs.end(); ++vvIt )
+        for ( ActorToCounterMapConstIterator vvIt = That.m_Pairs.begin(); vvIt != That.m_Pairs.end(); ++vvIt )
         {
             AddPair( (*vvIt).first, (*vvIt).second );
         }
@@ -95,7 +95,7 @@ bool VersionVector::Merge( const VersionVector& That )
 
 bool VersionVector::ContainsActor( const Actor& Act, Counter* pEvent ) const
 {
-    auto pairIt = m_Pairs.find( Act );
+    ActorToCounterMapConstIterator pairIt = m_Pairs.find( Act );
     bool actorPresent = (pairIt != m_Pairs.end());
     if ( actorPresent && pEvent != NULL )
     {
@@ -126,8 +126,8 @@ int VersionVector::Compare( const VersionVector& That ) const
 
     // this object has the same number of entries as That, so we need to compare entry-by-entry
     int retVal = 0;
-    auto thisIt = m_Pairs.begin();
-    auto thatIt = That.m_Pairs.begin();
+    ActorToCounterMapConstIterator thisIt = m_Pairs.begin();
+    ActorToCounterMapConstIterator thatIt = That.m_Pairs.begin();
     for ( size_t j = 0; 0 == retVal && j < thisSize; ++j, ++thisIt, ++thatIt )
     {
         // compare the Actor objects
@@ -297,7 +297,7 @@ bool VersionVector::ToBinaryValue( Buffer& Value ) const
         }
 
         // now add the 2-tuples of the form {Actor :: binary(8), Count :: pos_integer()}
-        for ( auto pairIt = m_Pairs.begin(); pairIt != m_Pairs.end(); ++pairIt )
+        for ( ActorToCounterMapConstIterator pairIt = m_Pairs.begin(); pairIt != m_Pairs.end(); ++pairIt )
         {
             // write the tuple record ID byte (104) followed by the tuple's arity (2)
             char tuple[2];
@@ -328,7 +328,7 @@ std::string VersionVector::ToString() const
 {
     std::stringstream versionVectorStr;
     int j = 0;
-    for ( auto pairIt = m_Pairs.begin(); pairIt != m_Pairs.end(); ++pairIt )
+    for ( ActorToCounterMapConstIterator pairIt = m_Pairs.begin(); pairIt != m_Pairs.end(); ++pairIt )
     {
         if ( j++ > 0 )
         {
@@ -356,14 +356,16 @@ bool DotCloud::AddDot( const Actor& Act, Counter Event )
     CounterSet eventsIn;
     eventsIn.insert( Event );
 
-    auto result = m_Dots.insert( std::pair<Actor, CounterSet>( Act, eventsIn ) );
+    std::pair<ActorToCounterSetMapIterator, bool> result =
+        m_Dots.insert( std::pair<Actor, CounterSet>( Act, eventsIn ) );
+
     bool retVal = result.second;
     if ( !retVal )
     {
         // the Actor is already in the map, so see if the incoming Event
         // value already in the Actor's CounterSet
         CounterSet& events( (*result.first).second );
-        auto result2 = events.insert( Event );
+        std::pair<CounterSet::iterator, bool> result2 = events.insert( Event );
         retVal = result2.second;
     }
     return retVal;
@@ -371,13 +373,15 @@ bool DotCloud::AddDot( const Actor& Act, Counter Event )
 
 bool DotCloud::AddDots( const Actor& Act, const CounterSet& Events )
 {
-    auto result = m_Dots.insert( std::pair<Actor, CounterSet>( Act, Events ) );
+    std::pair<ActorToCounterSetMapIterator, bool> result =
+        m_Dots.insert( std::pair<Actor, CounterSet>( Act, Events ) );
+
     bool retVal = result.second;
     if ( !retVal )
     {
         // the Actor is already in the map, so see if we can add any of the
         // events from the caller's CounterSet
-        for ( auto eventIt = Events.begin(); eventIt != Events.end(); ++eventIt )
+        for ( CounterSet::const_iterator eventIt = Events.begin(); eventIt != Events.end(); ++eventIt )
         {
             bool eventRetVal = AddDot( Act, *eventIt );
             if ( eventRetVal )
@@ -393,7 +397,7 @@ bool DotCloud::Merge( const DotCloud& That )
 {
     if ( this != &That )
     {
-        for ( auto dcIt = That.m_Dots.begin(); dcIt != That.m_Dots.end(); ++dcIt )
+        for ( ActorToCounterSetMapConstIterator dcIt = That.m_Dots.begin(); dcIt != That.m_Dots.end(); ++dcIt )
         {
             AddDots( (*dcIt).first, (*dcIt).second );
         }
@@ -423,8 +427,8 @@ int DotCloud::Compare( const DotCloud& That ) const
 
     // this object has the same number of entries as That, so we need to compare entry-by-entry
     int retVal = 0;
-    auto thisIt = m_Dots.begin();
-    auto thatIt = That.m_Dots.begin();
+    ActorToCounterSetMapConstIterator thisIt = m_Dots.begin();
+    ActorToCounterSetMapConstIterator thatIt = That.m_Dots.begin();
     for ( size_t j = 0; 0 == retVal && j < thisSize; ++j, ++thisIt, ++thatIt )
     {
         // compare the Actor objects
@@ -448,8 +452,8 @@ int DotCloud::Compare( const DotCloud& That ) const
                 // compare the individual Counter values
                 const CounterSet& thisCounterSet( (*thisIt).second );
                 const CounterSet& thatCounterSet( (*thatIt).second );
-                auto thisCounterIt = thisCounterSet.begin();
-                auto thatCounterIt = thatCounterSet.begin();
+                CounterSet::const_iterator thisCounterIt = thisCounterSet.begin();
+                CounterSet::const_iterator thatCounterIt = thatCounterSet.begin();
                 for ( size_t k = 0; 0 == retVal && k < thisDotCount; ++k, ++thisCounterIt, ++thatCounterIt )
                 {
                     Counter thisCounter = *thisCounterIt;
@@ -471,7 +475,7 @@ int DotCloud::Compare( const DotCloud& That ) const
 
 bool DotCloud::ContainsActor( const Actor& Act, CounterSet* pEvents ) const
 {
-    auto dotsIt = m_Dots.find( Act );
+    ActorToCounterSetMapConstIterator dotsIt = m_Dots.find( Act );
     bool actorPresent = (dotsIt != m_Dots.end());
     if ( actorPresent && pEvents != NULL )
     {
@@ -485,7 +489,7 @@ std::string DotCloud::ToString() const
 {
     std::stringstream dotCloudStr;
     int j = 0;
-    for ( auto dotsIt = m_Dots.begin(); dotsIt != m_Dots.end(); ++dotsIt )
+    for ( ActorToCounterSetMapConstIterator dotsIt = m_Dots.begin(); dotsIt != m_Dots.end(); ++dotsIt )
     {
         if ( j++ > 0 )
         {
@@ -497,7 +501,7 @@ std::string DotCloud::ToString() const
 
         int k = 0;
         const CounterSet& events( (*dotsIt).second );
-        for ( auto evIt = events.begin(); evIt != events.end(); ++evIt )
+        for ( CounterSet::const_iterator evIt = events.begin(); evIt != events.end(); ++evIt )
         {
             if ( k++ > 0 )
             {
@@ -1189,16 +1193,16 @@ void BigsetClock::CompressSeen()
     // compacted
 
     // TODO: clean this up to not directly use the data members of m_DotCount and m_VersionVector
-    std::map<Actor, Counter>& versionVector( m_VersionVector.m_Pairs );
-    std::map<Actor, CounterSet>& dotCloud( m_DotCloud.m_Dots );
-    for ( auto dcIt = dotCloud.begin(); dcIt != dotCloud.end(); /* dcIt advanced below */ )
+    ActorToCounterMap& versionVector( m_VersionVector.m_Pairs );
+    ActorToCounterSetMap& dotCloud( m_DotCloud.m_Dots );
+    for ( ActorToCounterSetMapIterator dcIt = dotCloud.begin(); dcIt != dotCloud.end(); /* dcIt advanced below */ )
     {
         // get the actor/events for this dot cloud entry
         const Actor& actor( (*dcIt).first );
         CounterSet& events( (*dcIt).second );
 
         // does the actor from this dot cloud entry appear in the version vector?
-        auto vvIt = versionVector.find( actor );
+        ActorToCounterMapIterator vvIt = versionVector.find( actor );
         if ( vvIt != versionVector.end() )
         {
             // yes, the actor from the dot cloud entry is in the version vector;
@@ -1206,7 +1210,7 @@ void BigsetClock::CompressSeen()
             // an event is contiguous with the VV (can then compress) or dominated
             // by the VV (can then remove)
             Counter vvEvent = (*vvIt).second;
-            for ( auto eventIt = events.begin(); eventIt != events.end(); /* eventIt advanced below */ )
+            for ( CounterSet::iterator eventIt = events.begin(); eventIt != events.end(); /* eventIt advanced below */ )
             {
                 Counter dcEvent = *eventIt;
                 if ( dcEvent == vvEvent + 1 )
@@ -1257,8 +1261,8 @@ void BigsetClock::CompressSeen()
 void BigsetClock::SubtractSeen( DotList& Dots ) const
 {
     // walk the list of dots in the caller's DotList, removing any seen by this BigsetClock
-    std::map<Actor, Counter>& dots( Dots.m_Pairs );
-    for ( auto dotIt = dots.begin(); dotIt != dots.end(); /* dotIt advanced below */ )
+    ActorToCounterMap& dots( Dots.m_Pairs );
+    for ( ActorToCounterMapIterator dotIt = dots.begin(); dotIt != dots.end(); /* dotIt advanced below */ )
     {
         if ( IsSeen( (*dotIt).first, (*dotIt).second ) )
         {

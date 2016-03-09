@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.3)
 set(GTEST_DIR "/Users/pplace/github/googletest/googletest")
 set(ERLANG_INCLUDE_DIR "/Users/pplace/erlang/R16B02/usr/include")
 
-set(CMAKE_CXX_FLAGS "-Wall -O0 -g3 -std=c++11 -stdlib=libc++ -Wno-deprecated -pthread")
+set(CMAKE_CXX_FLAGS "-Wall -O0 -g3 -stdlib=libc++ -Wno-deprecated -pthread")
 
 add_subdirectory("c_src/leveldb")
 

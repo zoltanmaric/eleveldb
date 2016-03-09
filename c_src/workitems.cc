@@ -20,10 +20,6 @@
 //
 // -------------------------------------------------------------------
 
-#include <syslog.h>
-#include <leveldb/env.h>
-#include "util/stringUtils.h"
-
 #ifndef __ELEVELDB_DETAIL_HPP
     #include "detail.hpp"
 #endif
@@ -36,10 +32,14 @@
 
 #include "ErlUtil.h"
 
+//#include <syslog.h>
+
+#include <leveldb/env.h>
+#include "util/stringUtils.h"
+
 #include "leveldb/cache.h"
 #include "leveldb/comparator.h"
 #include "leveldb/filter_policy.h"
-#include "leveldb/perf_count.h"
 
 // error_tuple duplicated in workitems.cc and eleveldb.cc ... how to fix?
 static ERL_NIF_TERM error_tuple(ErlNifEnv* env, ERL_NIF_TERM error, leveldb::Status& status)

@@ -131,12 +131,12 @@ ParseActorTupleString( std::string& ActorTupleStr, bool IsVersionVector, basho::
     }
 
     // find the opening and closing curly braces and extract the actor ID string
-    auto openingBrace = ActorTupleStr.find( '{' );
+    std::string::size_type openingBrace = ActorTupleStr.find( '{' );
     if ( std::string::npos == openingBrace )
     {
         return 40;
     }
-    auto closingBrace = ActorTupleStr.find( '}', openingBrace + 1 );
+    std::string::size_type closingBrace = ActorTupleStr.find( '}', openingBrace + 1 );
     if ( std::string::npos == closingBrace )
     {
         return 41;
@@ -154,7 +154,7 @@ ParseActorTupleString( std::string& ActorTupleStr, bool IsVersionVector, basho::
         }
 
         const std::string actorIdEndStr( ">>," );
-        auto binaryEnd = tupleBinaryStr.find( actorIdEndStr );
+        std::string::size_type binaryEnd = tupleBinaryStr.find( actorIdEndStr );
         if ( std::string::npos == binaryEnd )
         {
             return 43;
@@ -228,7 +228,7 @@ ParseBigsetClockTermString( const std::string& ClockStr, basho::bigset::BigsetCl
     //
     //      [{Actor :: binary(8), [pos_integer()]}]
     std::string clockStr( basho::utils::TrimWhitespace( ClockStr ) );
-    auto len = clockStr.size();
+    std::string::size_type len = clockStr.size();
     if ( len < 7 ) // minimum size for an empty clock
     {
         return 31;
@@ -246,7 +246,7 @@ ParseBigsetClockTermString( const std::string& ClockStr, basho::bigset::BigsetCl
 
     // ensure clockStr is a 2-tuple of lists
     std::string listSepStr( "],[" );
-    auto listSep = clockStr.find( listSepStr );
+    std::string::size_type listSep = clockStr.find( listSepStr );
     if ( std::string::npos == listSep )
     {
         // didn't find the separator for the two lists in the 2-tuple
@@ -279,7 +279,7 @@ int // 0 => all good, else had an error
 ProcessTermToBinaryLine( const std::string& Line, int LineNumber )
 {
     // parse the line into the the two pieces we expect
-    auto separator = Line.find( " : " );
+    std::string::size_type separator = Line.find( " : " );
     if ( separator == std::string::npos )
     {
         printf( "Line %d (%s) not in the expected format\n", LineNumber, Line.c_str() );
@@ -329,13 +329,13 @@ ProcessMergedClocksLine( const std::string& Line, int LineNumber )
 {
     // parse the line into the the three pieces we expect
     const std::string separatorStr( " : " );
-    auto separator1 = Line.find( separatorStr );
+    std::string::size_type separator1 = Line.find( separatorStr );
     if ( separator1 == std::string::npos )
     {
         printf( "Line %d (%s) not in the expected format\n", LineNumber, Line.c_str() );
         return 20;
     }
-    auto separator2 = Line.find( separatorStr, separator1 + separatorStr.size() );
+    std::string::size_type separator2 = Line.find( separatorStr, separator1 + separatorStr.size() );
     if ( separator2 == std::string::npos )
     {
         printf( "Line %d (%s) not in the expected format\n", LineNumber, Line.c_str() );

@@ -4,7 +4,7 @@ project(BashoUtils CXX)
 # set GTEST_DIR in the shell env?
 set(GTEST_DIR "/Users/pplace/github/googletest/googletest")
 
-set(CMAKE_CXX_FLAGS "-Wall -O0 -g3 -std=c++11 -stdlib=libc++ -Wno-deprecated -pthread")
+set(CMAKE_CXX_FLAGS "-Wall -O0 -g3 -stdlib=libc++ -Wno-deprecated -pthread")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ../leveldb/include ${GTEST_DIR}/include ${GTEST_DIR})
 

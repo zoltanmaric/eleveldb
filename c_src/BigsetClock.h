@@ -140,10 +140,20 @@ public:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+// Some helpful typedefs
+typedef std::map<Actor, Counter>          ActorToCounterMap;
+typedef ActorToCounterMap::iterator       ActorToCounterMapIterator;
+typedef ActorToCounterMap::const_iterator ActorToCounterMapConstIterator;
+
+typedef std::map<Actor, CounterSet>          ActorToCounterSetMap;
+typedef ActorToCounterSetMap::iterator       ActorToCounterSetMapIterator;
+typedef ActorToCounterSetMap::const_iterator ActorToCounterSetMapConstIterator;
+
+///////////////////////////////////////////////////////////////////////////////
 // VersionVector class: contains a collection of Actor/Counter pairs, ordered by Actor
 class VersionVector
 {
-    std::map<Actor, Counter> m_Pairs;
+    ActorToCounterMap m_Pairs;
 
     friend class BigsetClock; // TODO: remove this if possible
 
@@ -224,7 +234,7 @@ typedef VersionVector DotList;
 // DotCloud class: contains a collection of Actor/CounterSet pairs, ordered by Actor
 class DotCloud
 {
-    std::map<Actor, CounterSet> m_Dots;
+    ActorToCounterSetMap m_Dots;
 
     friend class BigsetClock; // TODO: remove this if possible
 
