@@ -4,6 +4,7 @@
 
 #include "BigsetClock.h"
 #include <sstream>
+#include <stdio.h>
 
 namespace basho {
 namespace bigset {
@@ -40,7 +41,7 @@ std::string Actor::ToString() const
 {
     std::stringstream actorStr;
     actorStr << "<<";
-    for ( int j = 0; j < sizeof m_ID; ++j )
+    for ( size_t j = 0; j < sizeof m_ID; ++j )
     {
         if ( j > 0 )
         {
