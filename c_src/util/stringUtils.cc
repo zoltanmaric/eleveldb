@@ -1,4 +1,5 @@
 #include "utils.h"
+#include <stdlib.h>
 
 namespace basho {
 namespace utils {
@@ -48,7 +49,7 @@ std::string FormatIntAsString( uint64_t Value )
     // (i.e., not ANSI-C) and may not be implemented on all platforms we support
     char valueBuff[24]; // large enough to hold max uint64_t (18446744073709551615) + null terminator
     const int charsToWrite = ::snprintf( valueBuff, sizeof valueBuff, "%llu", Value );
-    if ( charsToWrite < 0 || charsToWrite >= sizeof valueBuff )
+    if ( charsToWrite < 0 || static_cast<size_t>( charsToWrite ) >= sizeof valueBuff )
     {
         // we either had a formatting error or we overflowed valueBuff; neither should happen
         retVal = "<ERROR FORMATTING NUMBER>";
@@ -123,7 +124,7 @@ std::string FormatSizeAsString( uint64_t SizeInBytes, bool IncludeExactSize )
             char valueBuff[32];
             int charsToWrite = ::snprintf( valueBuff, sizeof valueBuff,
                                            "%.2f %s", adjustedSize, s_Suffixes[ adjustmentCount ] );
-            if ( charsToWrite > 0 && charsToWrite < sizeof valueBuff )
+            if ( charsToWrite > 0 && static_cast<size_t>( charsToWrite ) < sizeof valueBuff )
             {
                 retVal = valueBuff;
                 if ( IncludeExactSize )
