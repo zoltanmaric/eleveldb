@@ -5,6 +5,9 @@
 #ifndef BASHOUTILS_STRINGUTILS_H
 #define BASHOUTILS_STRINGUTILS_H
 
+#include <stdint.h>
+#include <string>
+
 namespace basho {
 namespace utils {
 

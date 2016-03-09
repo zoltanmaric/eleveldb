@@ -8,7 +8,7 @@ std::string
 TrimCharacters( const std::string& StrIn, const std::string& CharsToTrim )
 {
     // find the index of the first non-CharsToTrim char in Str
-    auto firstNonCharToTrim = StrIn.find_first_not_of( CharsToTrim );
+    std::string::size_type firstNonCharToTrim = StrIn.find_first_not_of( CharsToTrim );
     if ( firstNonCharToTrim == std::string::npos )
     {
         // Str is nothing but CharsToTrim (or possibly it's empty)
@@ -16,7 +16,7 @@ TrimCharacters( const std::string& StrIn, const std::string& CharsToTrim )
     }
 
     // find the index of the last non-CharsToTrim char in Str
-    auto lastNonCharToTrim = StrIn.find_last_not_of( CharsToTrim );
+    std::string::size_type lastNonCharToTrim = StrIn.find_last_not_of( CharsToTrim );
     if ( lastNonCharToTrim == std::string::npos )
     {
         // hmm...this shouldn't happen since we already verified above that we

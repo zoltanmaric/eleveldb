@@ -5,6 +5,9 @@
 #ifndef BASHOUTILS_ERLANGUTILS_H
 #define BASHOUTILS_ERLANGUTILS_H
 
+#include "buffer.h"
+#include <string>
+
 namespace basho {
 namespace utils {
 

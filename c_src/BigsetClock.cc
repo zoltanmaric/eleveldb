@@ -735,7 +735,7 @@ BigsetClock::ProcessListOfTwoTuplesErrorMessage(
     {
         char buff[ 100 ];
         int charsWritten = ::snprintf( buff, sizeof buff, "(item %u) ", ItemNumber );
-        if ( charsWritten > 0 && charsWritten < sizeof buff )
+        if ( charsWritten > 0 && static_cast<size_t>( charsWritten ) < sizeof buff )
         {
             Error.append( buff );
         }
@@ -1093,7 +1093,7 @@ BigsetClock::FormatUnrecognizedRecordTypeError(
 
     char buff[ 32 ];
     int charsWritten = ::snprintf( buff, sizeof buff, " %d", static_cast<int>( (uint8_t)RecordId ) );
-    if ( charsWritten > 0 && charsWritten < sizeof buff )
+    if ( charsWritten > 0 && static_cast<size_t>( charsWritten ) < sizeof buff )
     {
         Error.append( buff );
     }
