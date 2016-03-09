@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 #include <stdexcept>
+#include <stdint.h> // needed on some platforms for decl of uint64_t
 #include <leveldb/slice.h>
 #include "util/buffer.h"
 
