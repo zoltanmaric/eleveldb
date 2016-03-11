@@ -35,7 +35,7 @@
 //#include <syslog.h>
 
 #include <leveldb/env.h>
-#include "util/stringUtils.h"
+#include "util/utils.h"
 
 #include "leveldb/cache.h"
 #include "leveldb/comparator.h"
@@ -946,6 +946,12 @@ work_result RangeScanTask::operator()()
     uint64_t startMicros = (NULL == pEnv) ? 0 : pEnv->NowMicros();
     uint64_t recordsConsidered = 0, recordsReturned = 0, bytesReturned = 0;
 
+    bool useErlangBinaryFormat = false;
+    if ( options_.isBigset_ )
+    {
+        useErlangBinaryFormat = bigset_acc_->UseErlangBinaryFormat();
+    }
+
     ErlNifEnv* env     = local_env_;
     ErlNifEnv* msg_env = enif_alloc_env();
     ErlNifEnvFreeHelper msgEnvFreeHelper( msg_env ); // ensure we free this
@@ -955,7 +961,7 @@ work_result RangeScanTask::operator()()
     read_options.fill_cache = options_.fill_cache;
     read_options.verify_checksums = options_.verify_checksums;
 
-    leveldb::Iterator* iter        = m_DbPtr->m_Db->NewIterator(read_options);
+    std::auto_ptr<leveldb::Iterator> iter( m_DbPtr->m_Db->NewIterator(read_options) );
     const leveldb::Comparator* cmp = m_DbPtr->m_DbOptions->comparator;
 
     const leveldb::Slice skey_slice(start_key_);
@@ -970,6 +976,7 @@ work_result RangeScanTask::operator()()
     const size_t initial_bin_size = size_t(options_.max_batch_bytes * 1.1);
     size_t out_offset = 0;
     size_t num_read   = 0;
+    uint32_t numInBatch = 0; // number of records we've added to the current send buffer
 
     //------------------------------------------------------------
     // Skip if not including first key and first key exists
@@ -977,12 +984,13 @@ work_result RangeScanTask::operator()()
 
     if (!options_.start_inclusive
         && iter->Valid()
-        && cmp->Compare(iter->key(), skey_slice) == 0) {
+        && cmp->Compare(iter->key(), skey_slice) == 0)
+    {
         iter->Next();
     }
 
-    while (!sync_obj_->IsConsumerDead()) {
-
+    while ( !sync_obj_->IsConsumerDead() )
+    {
         //------------------------------------------------------------
         // If reached end (iter invalid) or we've reached the
         // specified limit on number of items (options_.limit), or the
@@ -995,19 +1003,21 @@ work_result RangeScanTask::operator()()
                 (options_.end_inclusive ?
                  cmp->Compare(iter->key(), ekey_slice) > 0 :
                  cmp->Compare(iter->key(), ekey_slice) >= 0
-                ))) {
-
+                )))
+        {
             // If data are present in the batch (ie, out_offset != 0),
             // send the batch now
 
-	        if (out_offset) {
+	        if ( out_offset > 0 )
+            {
                 // Shrink it to final size.
                 if (out_offset != bin.size)
                     enif_realloc_binary(&bin, out_offset);
 
+                bytesReturned += bin.size;
                 send_streaming_batch(&pid, msg_env, caller_ref_term, &bin);
                 out_offset = 0;
-                bytesReturned += bin.size;
+                numInBatch = 0;
             }
 
             break;
@@ -1109,40 +1119,74 @@ work_result RangeScanTask::operator()()
             }
         }
         
-        if (filter_passed) {
+        if ( filter_passed )
+        {
+            // allocate the output buffer if this is the first KV pair in this batch
+            if ( out_offset == 0 )
+            {
+                enif_alloc_binary( initial_bin_size, &bin );
+                if ( useErlangBinaryFormat )
+                {
+                    // we write this KV pair to the output buffer in the Erlang
+                    // External Term Format specified at http://erlang.org/doc/apps/erts/erl_ext_dist.html;
+                    // specifically, we write it as a list of 1 or more 2-tuples of the form:
+                    //
+                    //      [{Key :: binary, Value :: binary}]
+
+                    // first we add the External Term Format magic number
+                    bin.data[0] = (unsigned char)131;
+
+                    // we are writing an Erlang list, which has the External Term Format
+                    //
+                    //      |1  |4     |        |    |
+                    //      |108|Length|Elements|Tail|
+                    bin.data[1] = (unsigned char)108;
+
+                    // leave room for the 4-byte length that we write once we know
+                    // the total number of 2-tuples
+                    out_offset = 6;
+                }
+            }
 
             ++recordsReturned;
 
             const size_t ksz = key.size();
             const size_t vsz = value.size();
 
-            const size_t ksz_sz = VarintLength(ksz);
-            const size_t vsz_sz = VarintLength(vsz);
+            // the number of bytes stored before a K/V entry depends on the encoding;
+            // for Erlang binary format, we store the ID byte 109 followed by the
+            // count of binary bytes as a 4-byte big-endian number; for the old-style
+            // encoding, we use a variable-length encoding of the size
+            const size_t ksz_sz = useErlangBinaryFormat ? 5 : VarintLength(ksz);
+            const size_t vsz_sz = useErlangBinaryFormat ? 5 : VarintLength(vsz);
 
-            const size_t esz = ksz + ksz_sz + vsz + vsz_sz;
+            // the total count of bytes we're writing to the output buffer is
+            // the size of the K/V binary blobs plus the blobs themselves; if
+            // we're writing the Erlang binary format, then we also need to
+            // add 2 bytes to indicate this is a 2-tuple
+            const size_t esz = ksz + ksz_sz + vsz + vsz_sz + (useErlangBinaryFormat ? 2 : 0);
             const size_t next_offset = out_offset + esz;
-
-            // Allocate the output data array if this is the first data
-            // (i.e., if out_offset == 0)
-
-            if (out_offset == 0)
-                enif_alloc_binary(initial_bin_size, &bin);
 
             //------------------------------------------------------------
             // If we need more space, allocate it exactly since that means we
             // reached the batch max anyway and will send it right away
             //------------------------------------------------------------
 
-            if (next_offset > bin.size)
-                enif_realloc_binary(&bin, next_offset);
+            // if we're writing the Erlang binary format, then we need to leave
+            // room for one last term, namely the empty list at the tail of the KV list
+            const size_t end_of_last_record = next_offset + (useErlangBinaryFormat ? 1 : 0);
+            if ( end_of_last_record > bin.size )
+            {
+                enif_realloc_binary( &bin, end_of_last_record );
+            }
 
             char * const out = (char*)bin.data + out_offset;
 
-            EncodeVarint64(out, ksz);
-            memcpy(out + ksz_sz, key.data(), ksz);
+            EncodeVarint64( out, ksz );
+            memcpy( out + ksz_sz, key.data(), ksz );
 
-            EncodeVarint64(out + ksz_sz + ksz, vsz);
-            memcpy(out + ksz_sz + ksz + vsz_sz, value.data(), vsz);
+            EncodeVarint64( out + ksz_sz + ksz, vsz );
+            memcpy( out + ksz_sz + ksz + vsz_sz, value.data(), vsz );
 
             out_offset = next_offset;
 
@@ -1151,19 +1195,31 @@ work_result RangeScanTask::operator()()
             // the batch, possibly shrink the binary and send it
             // ------------------------------------------------------------
 
-            if(out_offset >= options_.max_batch_bytes) {
+            if ( end_of_last_record >= options_.max_batch_bytes )
+            {
+                if ( end_of_last_record != bin.size )
+                {
+                    enif_realloc_binary( &bin, end_of_last_record );
+                }
 
-                if(out_offset != bin.size)
-                    enif_realloc_binary(&bin, out_offset);
+                // if we're writing the Erlang binary format, insert the count
+                // of tuples we added to the buffer (we left room for the count
+                // above), and add an empty list as the tail of the KV list
+                if ( useErlangBinaryFormat )
+                {
+                    basho::utils::FormatBigEndianUint32( numInBatch, (char*)bin.data + 2, sizeof numInBatch );
+                    bin.data[ next_offset ] = (unsigned char)106; // empty list record ID
+                }
 
-                send_streaming_batch(&pid, msg_env, caller_ref_term, &bin);
+                bytesReturned += bin.size;
+                send_streaming_batch( &pid, msg_env, caller_ref_term, &bin );
 
                 // Maybe block if max reached.
 
-                sync_obj_->AddBytes(out_offset);
+                sync_obj_->AddBytes( out_offset );
 
                 out_offset = 0;
-                bytesReturned += bin.size;
+                numInBatch = 0;
 	        }
 
     	    //------------------------------------------------------------
@@ -1172,6 +1228,7 @@ work_result RangeScanTask::operator()()
 	        //------------------------------------------------------------
 
 	        ++num_read;
+            ++numInBatch;
 
     	} else {
             //	  COUT("Filter DIDN'T pass");
@@ -1198,9 +1255,10 @@ work_result RangeScanTask::operator()()
         std::string recordsReturnedStr   = basho::utils::FormatIntAsString( recordsReturned );
         std::string bytesReturnedStr     = basho::utils::FormatSizeAsString( bytesReturned, true );
         leveldb::Log( m_DbPtr->m_Db->GetLogger(),
-                      "RangeScanTask: streaming fold took %s microsecs; records considered=%s, returned=%s; size returned=%s",
+                      "RangeScanTask: streaming fold took %s microsecs; records considered=%s, returned=%s; size returned=%s; format=%s",
                       elapsedMicrosStr.c_str(), recordsConsideredStr.c_str(),
-                      recordsReturnedStr.c_str(), bytesReturnedStr.c_str() );
+                      recordsReturnedStr.c_str(), bytesReturnedStr.c_str(),
+                      useErlangBinaryFormat ? "Erlang" : "standard");
     }
 
     return work_result();

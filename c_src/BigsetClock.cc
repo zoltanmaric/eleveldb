@@ -151,29 +151,6 @@ int VersionVector::Compare( const VersionVector& That ) const
     return retVal;
 }
 
-static bool FormatBigEndianUint32( uint32_t Value, char* pBuff, size_t BuffSizeInBytes )
-{
-    if ( BuffSizeInBytes < 4 )
-    {
-        return false;
-    }
-
-    // TODO: deal with running on a big-endian system
-    union
-    {
-        uint32_t m_Uint32;
-        char     m_Bytes[4];
-    } value;
-
-    value.m_Uint32 = Value;
-
-    pBuff[0] = value.m_Bytes[3];
-    pBuff[1] = value.m_Bytes[2];
-    pBuff[2] = value.m_Bytes[1];
-    pBuff[3] = value.m_Bytes[0];
-    return true;
-}
-
 static bool WriteActorToBinaryValue( const Actor& Act, Buffer& Value )
 {
     // we write the Actor ID to the provided Buffer in Erlang External Term
@@ -185,7 +162,7 @@ static bool WriteActorToBinaryValue( const Actor& Act, Buffer& Value )
 
     size_t actorIdSize = Actor::GetActorIdSizeInBytes();
     if (   actorIdSize > 0xffffffff
-        || !FormatBigEndianUint32( (uint32_t)actorIdSize, binaryHeader + 1, sizeof binaryHeader - 1 )
+        || !utils::FormatBigEndianUint32( (uint32_t)actorIdSize, binaryHeader + 1, sizeof binaryHeader - 1 )
         || !Value.Append( binaryHeader, sizeof binaryHeader ) )
     {
         return false;
@@ -212,7 +189,7 @@ static bool WriteCounterToBinaryValue( Counter Event, Buffer& Value )
         // which is a signed 32-bit value in big-endian format
         char largeInt[5];
         largeInt[0] = (char)98;
-        if ( FormatBigEndianUint32( (uint32_t)Event, largeInt + 1, sizeof largeInt - 1 ) )
+        if ( utils::FormatBigEndianUint32( (uint32_t)Event, largeInt + 1, sizeof largeInt - 1 ) )
         {
             return Value.Append( largeInt, sizeof largeInt );
         }
@@ -248,7 +225,7 @@ static bool WriteCounterToBinaryValue( Counter Event, Buffer& Value )
     return false;
 }
 
-bool VersionVector::ToBinaryValue( Buffer& Value ) const
+bool VersionVector::ToBinaryValue( Buffer& Value, bool FormatAsEmbeddedBinary ) const
 {
     // we write this VersionVector to the caller's Buffer in the Erlang External
     // Term Format specified at http://erlang.org/doc/apps/erts/erl_ext_dist.html;
@@ -261,9 +238,9 @@ bool VersionVector::ToBinaryValue( Buffer& Value ) const
 
     // TODO: all the hard-coded stuff below (probably) needs to be replaced with calls into the Erlang ei library
 
-    // first we add the External Term Format magic number
+    // if FormatAsEmbeddedBinary is false, we first add the External Term Format magic number
     char byteToAdd = (char)131;
-    if ( !Value.Append( &byteToAdd, 1 ) )
+    if ( !FormatAsEmbeddedBinary && !Value.Append( &byteToAdd, 1 ) )
     {
         return false;
     }
@@ -291,7 +268,7 @@ bool VersionVector::ToBinaryValue( Buffer& Value ) const
         // now add the number of terms in the list
         char lengthBytes[4];
         if (   pairCount > 0xffffffff
-            || !FormatBigEndianUint32( (uint32_t)pairCount, lengthBytes, sizeof lengthBytes )
+            || !utils::FormatBigEndianUint32( (uint32_t)pairCount, lengthBytes, sizeof lengthBytes )
             || !Value.Append( lengthBytes, sizeof lengthBytes ) )
         {
             return false;
@@ -322,7 +299,7 @@ bool VersionVector::ToBinaryValue( Buffer& Value ) const
 
     // append a final empty list, to make this a well-formed Erlang list (every list requires a tail element)
     byteToAdd = (char)106; // empty list record ID
-    return Value.Append( &byteToAdd, 1 );;
+    return Value.Append( &byteToAdd, 1 );
 }
 
 std::string VersionVector::ToString() const

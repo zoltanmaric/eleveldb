@@ -1,5 +1,9 @@
+//
+// Created by Paul A. Place on 2/4/16.
+//
+
 #include "utils.h"
-#include <stdio.h>
+#include <stdio.h> // need this to ensure snprintf() is declared on all platforms where we build
 
 namespace basho {
 namespace utils {

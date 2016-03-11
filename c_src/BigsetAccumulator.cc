@@ -16,7 +16,7 @@ BigsetAccumulator::FinalizeElement()
             // TODO: log an error that buffer assignment failed
             throw std::runtime_error( "Failed to assign current element to ready key" );
         }
-        if ( !m_CurrentDots.ToBinaryValue( m_ReadyValue ) )
+        if ( !m_CurrentDots.ToBinaryValue( m_ReadyValue, m_ErlangBinaryFormat ) )
         {
             // TODO: log an error that outputting the dot list failed
             throw std::runtime_error( "Failed to assign current dots to ready value" );

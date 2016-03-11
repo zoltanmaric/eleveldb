@@ -470,18 +470,20 @@ public:
     static SyncHandle* CreateSyncHandle(const RangeScanOptions & options);
     static SyncHandle* RetrieveSyncHandle(ErlNifEnv* env, ERL_NIF_TERM term);
     static void SyncHandleResourceCleanup(ErlNifEnv* env, void* arg);
-    
+
+private:
+    // helper methods used by operator() to send messages back to erlang
     void sendMsg(ErlNifEnv* msg_env, ERL_NIF_TERM atom, ErlNifPid pid);
     void sendMsg(ErlNifEnv* msg_env, ERL_NIF_TERM atom, ErlNifPid pid, const char* errMsg);
     void sendMsg(ErlNifEnv* msg_env, ERL_NIF_TERM atom, ErlNifPid pid, const std::string& errMsg);
-
-    int VarintLength(uint64_t v);    
-    char* EncodeVarint64(char* dst, uint64_t v);
     void send_streaming_batch(ErlNifPid* pid, ErlNifEnv* msg_env, ERL_NIF_TERM ref_term,
                               ErlNifBinary* bin);
 
+    // helper methods used to format the K/V pair as length-prefixed blobs
+    int VarintLength(uint64_t v);
+    char* EncodeVarint64(char* dst, uint64_t v);
+
 protected:
-    
     RangeScanOptions options_;
     std::string start_key_;
     std::string end_key_;

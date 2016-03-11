@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <stdint.h> // needed on some platforms for decl of uint64_t
 #include <leveldb/slice.h>
-#include "util/buffer.h"
+#include "util/utils.h"
 
 namespace basho {
 namespace bigset {
@@ -220,8 +220,10 @@ public:
     bool ContainsActor( const Actor& Act, Counter* pEvent = NULL ) const;
 
     // formats the VersionVector in Erlang term_to_binary() format, placing
-    // the bytes in the caller's Buffer
-    bool ToBinaryValue( Buffer& Value ) const;
+    // the bytes in the caller's Buffer; if FormatAsEmbeddedBinary is false,
+    // then the formatted value is a stand-alone blob, else it will be part
+    // of a larger erlang binary blob
+    bool ToBinaryValue( Buffer& Value, bool FormatAsEmbeddedBinary ) const;
 
     // returns the VersionVector as a string, in Erlang term format
     std::string ToString() const;

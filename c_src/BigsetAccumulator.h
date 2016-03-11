@@ -26,6 +26,7 @@ private:
     bool        m_ElementReady;
     bool        m_ActorClockReady;
     bool        m_ActorClockSeen;
+    bool        m_ErlangBinaryFormat; // true => the entire blob we return is in erlang's external term format; else it's in the traditional list of length-prefixed KV pairs
 
     void FinalizeElement();
 
@@ -33,7 +34,8 @@ public:
     BigsetAccumulator( const Actor& ThisActor ) : m_ThisActor( ThisActor ),
                                                   m_ElementReady( false ),
                                                   m_ActorClockReady( false ),
-                                                  m_ActorClockSeen( false )
+                                                  m_ActorClockSeen( false ),
+                                                  m_ErlangBinaryFormat( false ) // TODO: make this a parameter?
     { }
 
     ~BigsetAccumulator() { }
@@ -45,9 +47,15 @@ public:
     AddRecord( Slice key, Slice value );
 
     bool
-    RecordReady()
+    RecordReady() const
     {
         return m_ElementReady || m_ActorClockReady;
+    }
+
+    bool
+    UseErlangBinaryFormat() const
+    {
+        return m_ErlangBinaryFormat;
     }
 
     void

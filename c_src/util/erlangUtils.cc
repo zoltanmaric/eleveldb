@@ -73,5 +73,33 @@ ParseErlangBinaryString(
     return rawBytes;
 }
 
+// writes a 32-bit integer value to a buffer in big-endian format
+bool
+FormatBigEndianUint32(
+    uint32_t Value,            // IN: value to write to the buffer
+    char*    pBuff,            // IN: buffer where Value is written in big-endian format; must have at least 4 bytes available
+    size_t   BuffSizeInBytes ) // IN: size of the buffer in bytes (ensures Value will fit)
+{
+    if ( BuffSizeInBytes < 4 )
+    {
+        return false;
+    }
+
+    // TODO: deal with running on a big-endian system
+    union
+    {
+        uint32_t m_Uint32;
+        char     m_Bytes[4];
+    } value;
+
+    value.m_Uint32 = Value;
+
+    pBuff[0] = value.m_Bytes[3];
+    pBuff[1] = value.m_Bytes[2];
+    pBuff[2] = value.m_Bytes[1];
+    pBuff[3] = value.m_Bytes[0];
+    return true;
+}
+
 } // namespace utils
 } // namespace basho
