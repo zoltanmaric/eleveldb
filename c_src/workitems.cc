@@ -975,8 +975,9 @@ work_result RangeScanTask::operator()()
     ErlNifBinary bin;
     const size_t initial_bin_size = size_t(options_.max_batch_bytes * 1.1);
     size_t out_offset = 0;
+    size_t end_of_last_record = 0;
     size_t num_read   = 0;
-    uint32_t numInBatch = 0; // number of records we've added to the current send buffer
+    uint32_t numInBatch = 0; // number of records we've added to the current send buffer; this must be a 32-bit value
 
     //------------------------------------------------------------
     // Skip if not including first key and first key exists
@@ -1005,17 +1006,28 @@ work_result RangeScanTask::operator()()
                  cmp->Compare(iter->key(), ekey_slice) >= 0
                 )))
         {
-            // If data are present in the batch (ie, out_offset != 0),
-            // send the batch now
-
-	        if ( out_offset > 0 )
+            // if we have any records to send, do so now
+	        if ( numInBatch > 0 )
             {
-                // Shrink it to final size.
-                if (out_offset != bin.size)
-                    enif_realloc_binary(&bin, out_offset);
+                end_of_last_record = out_offset + (useErlangBinaryFormat ? 1 : 0);
+
+                // set the buffer to its final size
+                if ( end_of_last_record != bin.size )
+                {
+                    enif_realloc_binary( &bin, end_of_last_record );
+                }
+
+                // if we're writing the Erlang binary format, insert the count
+                // of tuples we added to the buffer (we left room for the count
+                // below), and add an empty list as the tail of the KV list
+                if ( useErlangBinaryFormat )
+                {
+                    basho::utils::FormatBigEndianUint32( numInBatch, (char*)bin.data + 2, 4 );
+                    bin.data[ out_offset ] = (unsigned char)106; // empty list record ID
+                }
 
                 bytesReturned += bin.size;
-                send_streaming_batch(&pid, msg_env, caller_ref_term, &bin);
+                send_streaming_batch( &pid, msg_env, caller_ref_term, &bin );
                 out_offset = 0;
                 numInBatch = 0;
             }
@@ -1149,6 +1161,7 @@ work_result RangeScanTask::operator()()
             }
 
             ++recordsReturned;
+            ++numInBatch;
 
             const size_t ksz = key.size();
             const size_t vsz = value.size();
@@ -1164,7 +1177,8 @@ work_result RangeScanTask::operator()()
             // the size of the K/V binary blobs plus the blobs themselves; if
             // we're writing the Erlang binary format, then we also need to
             // add 2 bytes to indicate this is a 2-tuple
-            const size_t esz = ksz + ksz_sz + vsz + vsz_sz + (useErlangBinaryFormat ? 2 : 0);
+            const size_t header_sz = (useErlangBinaryFormat ? 2 : 0);
+            const size_t esz = header_sz + ksz + ksz_sz + vsz + vsz_sz;
             const size_t next_offset = out_offset + esz;
 
             //------------------------------------------------------------
@@ -1174,7 +1188,7 @@ work_result RangeScanTask::operator()()
 
             // if we're writing the Erlang binary format, then we need to leave
             // room for one last term, namely the empty list at the tail of the KV list
-            const size_t end_of_last_record = next_offset + (useErlangBinaryFormat ? 1 : 0);
+            end_of_last_record = next_offset + (useErlangBinaryFormat ? 1 : 0);
             if ( end_of_last_record > bin.size )
             {
                 enif_realloc_binary( &bin, end_of_last_record );
@@ -1182,11 +1196,23 @@ work_result RangeScanTask::operator()()
 
             char * const out = (char*)bin.data + out_offset;
 
-            EncodeVarint64( out, ksz );
-            memcpy( out + ksz_sz, key.data(), ksz );
+            if ( useErlangBinaryFormat )
+            {
+                // write the tuple record ID byte (104) followed by the tuple's arity (2)
+                out[0] = (char)104;
+                out[1] = (char)2;
 
-            EncodeVarint64( out + ksz_sz + ksz, vsz );
-            memcpy( out + ksz_sz + ksz + vsz_sz, value.data(), vsz );
+                basho::utils::WriteErlangBinary( key.data(), ksz, out + header_sz, ksz_sz + ksz );
+                basho::utils::WriteErlangBinary( value.data(), vsz, out + header_sz + ksz_sz + ksz, vsz_sz + vsz );
+            }
+            else
+            {
+                EncodeVarint64( out, ksz );
+                memcpy( out + ksz_sz, key.data(), ksz );
+
+                EncodeVarint64( out + ksz_sz + ksz, vsz );
+                memcpy( out + ksz_sz + ksz + vsz_sz, value.data(), vsz );
+            }
 
             out_offset = next_offset;
 
@@ -1207,7 +1233,7 @@ work_result RangeScanTask::operator()()
                 // above), and add an empty list as the tail of the KV list
                 if ( useErlangBinaryFormat )
                 {
-                    basho::utils::FormatBigEndianUint32( numInBatch, (char*)bin.data + 2, sizeof numInBatch );
+                    basho::utils::FormatBigEndianUint32( numInBatch, (char*)bin.data + 2, 4 );
                     bin.data[ next_offset ] = (unsigned char)106; // empty list record ID
                 }
 
@@ -1228,7 +1254,6 @@ work_result RangeScanTask::operator()()
 	        //------------------------------------------------------------
 
 	        ++num_read;
-            ++numInBatch;
 
     	} else {
             //	  COUT("Filter DIDN'T pass");

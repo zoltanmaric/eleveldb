@@ -27,6 +27,14 @@ FormatBigEndianUint32(
     char*    pBuff,             // IN: buffer where Value is written in big-endian format; must have at least 4 bytes available
     size_t   BuffSizeInBytes ); // IN: size of the buffer in bytes (ensures Value will fit)
 
+// writes the contents of a buffer to an Erlang binary ETF record type
+bool
+WriteErlangBinary(
+    const void* pBinary,          // IN: binary data to write as an Erlang binary ETF record
+    size_t      BinarySize,       // IN: number of bytes in the binary data
+    char*       OutputBuffer,     // IN: buffer where the record is written
+    size_t      OutputBuffSize ); // IN: size of the buffer (ensures the record will fit)
+
 } // namespace utils
 } // namespace basho
 

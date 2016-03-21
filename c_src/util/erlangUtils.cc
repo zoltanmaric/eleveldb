@@ -101,5 +101,28 @@ FormatBigEndianUint32(
     return true;
 }
 
+// writes the contents of a buffer to an Erlang binary ETF record type
+bool
+    WriteErlangBinary(
+    const void* pBinary,         // IN: binary data to write as an Erlang binary ETF record
+    size_t      BinarySize,      // IN: number of bytes in the binary data
+    char*       OutputBuffer,    // IN: buffer where the record is written
+    size_t      OutputBuffSize ) // IN: size of the buffer (ensures the record will fit)
+{
+    // we are writing an Erlang binary record, which has the External Term Format
+    //
+    //      |1  |4     |Length|
+    //      |109|Length|Data  |
+    if ( OutputBuffSize < 5 + BinarySize || BinarySize > 0xffffffff )
+    {
+        return false;
+    }
+
+    OutputBuffer[0] = (char)109;
+    FormatBigEndianUint32( (uint32_t)BinarySize, OutputBuffer + 1, OutputBuffSize - 1 );
+    ::memcpy( OutputBuffer + 5, pBinary, BinarySize );
+    return true;
+}
+
 } // namespace utils
 } // namespace basho
