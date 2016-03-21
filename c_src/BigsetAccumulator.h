@@ -35,7 +35,7 @@ public:
                                                   m_ElementReady( false ),
                                                   m_ActorClockReady( false ),
                                                   m_ActorClockSeen( false ),
-                                                  m_ErlangBinaryFormat( false ) // TODO: make this a parameter?
+                                                  m_ErlangBinaryFormat( true ) // TODO: make this a parameter?
     { }
 
     ~BigsetAccumulator() { }
