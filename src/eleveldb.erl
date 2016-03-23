@@ -77,6 +77,8 @@
 
 -import(lager,[info/2]).
 
+-include_lib("profiler/include/profiler.hrl").
+
 %% This cannot be a separate function. Code must be inline to trigger
 %% Erlang compiler's use of optimized selective receive.
 -define(WAIT_FOR_REPLY(Ref),
@@ -362,6 +364,8 @@ parse_string(Size, Shift, <<0:1, N:7, Bin/binary>>) ->
 %% range_filter passed as part of the streaming options
 -spec fold(db_ref(), fold_fun(), any(), fold_options()) -> any().
 fold(Ref, Fun, Acc0, Opts) ->
+    profiler:perf_profile({start, 12, ?FNNAME()}),
+    Ret =
     case proplists:get_value(fold_method, Opts, iterator) of
         iterator ->
             {ok, Itr} = iterator(Ref, Opts),
@@ -377,7 +381,9 @@ fold(Ref, Fun, Acc0, Opts) ->
                 %% Close early, do not wait for garbage collection.
                 streaming_stop(AckRef)
             end
-    end.
+    end,
+    profiler:perf_profile({stop, 12}),
+    Ret.
 
 -spec foldtest1(db_ref(), fold_fun(), any(), fold_options()) -> any().
 foldtest1(Ref, Fun, Acc0, Opts) ->
