@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <stdexcept>
 
 #define ThrowRuntimeError(text) {\
@@ -16,4 +17,11 @@
     _macroOs << text;		\
     std::cout << '\r' << _macroOs.str() << std::endl << "\r";\
 }
+
+#define FOUT(text) {                                                    \
+        std::fstream outfile;                                           \
+        outfile.open("/tmp/riak_test_scratch/eleveldb.txt", std::fstream::out|std::fstream::app); \
+        outfile << text << std::endl;                                   \
+        outfile.close();                                                \
+    }
 #endif
