@@ -1,4 +1,5 @@
 #include "CmpUtil.h"
+#include "EiUtil.h"
 #include "ErlUtil.h"
 #include "StringBuf.h"
 
@@ -492,23 +493,34 @@ void Extractor::getToRiakObjectContents(const char* data, size_t size,
      contentsSize = valLen;
 }
 
-//=======================================================================
-// Methods of Msgpack extractor
-//=======================================================================
-
-ExtractorMsgpack::ExtractorMsgpack() {}
-ExtractorMsgpack::~ExtractorMsgpack() {}
-
 /**.......................................................................
  * Extract relevant fields from a riak object into the expression tree
  */
-void ExtractorMsgpack::extractRiakObject(const char* data, size_t size, ExpressionNode<bool>* root) 
+void Extractor::extractRiakObject(const char* data, size_t size, ExpressionNode<bool>* root) 
 {
     const char* contentsPtr=0;
     size_t contentsSize=0;
     getToRiakObjectContents(data, size, &contentsPtr, contentsSize);
     extract(contentsPtr, contentsSize, root);
 }
+
+/**.......................................................................
+ * Extract relevant fields from the data array into the expression tree
+ */
+void Extractor::parseRiakObjectTypes(const char* data, size_t size) 
+{
+    const char* contentsPtr=0;
+    size_t contentsSize=0;
+    getToRiakObjectContents(data, size, &contentsPtr, contentsSize);
+    parseTypes(contentsPtr, contentsSize);
+}
+
+//=======================================================================
+// Methods of Msgpack extractor
+//=======================================================================
+
+ExtractorMsgpack::ExtractorMsgpack() {}
+ExtractorMsgpack::~ExtractorMsgpack() {}
 
 void ExtractorMsgpack::extract(const char* data, size_t size, ExpressionNode<bool>* root) 
 {
@@ -715,30 +727,201 @@ void ExtractorMsgpack::setBinaryVal(ExpressionNode<bool>* root,
 }
 
 /**.......................................................................
- * Extract relevant fields from the data array into the expression tree
- */
-void ExtractorMsgpack::parseRiakObjectTypes(const char* data, size_t size) 
-{
-    const char* contentsPtr=0;
-    size_t contentsSize=0;
-    getToRiakObjectContents(data, size, &contentsPtr, contentsSize);
-
-    parseTypes(contentsPtr, contentsSize);
-}
-
-/**.......................................................................
  * Read through a msgpack-encoded object, parsing the data types for
  * each field we encounter
  */
 void ExtractorMsgpack::parseTypes(const char* data, size_t size) 
 {
     field_types_ = CmpUtil::parseMap(data, size);
-
-#if 0
-    CmpUtil::printMap(field_types_);
-    printMap(field_types_);
-#endif
-
     typesParsed_ = true;
 }
 
+//=======================================================================
+// Methods of ExtractorErlang
+//=======================================================================
+
+ExtractorErlang::ExtractorErlang() {}
+ExtractorErlang::~ExtractorErlang() {}
+
+void ExtractorErlang::parseTypes(const char* data, size_t size) 
+{
+    // In Ei format, first byte is a version
+
+    int index=1; 
+    field_types_ = EiUtil::parseMap((char*)data, &index);
+    typesParsed_ = true;
+}
+
+/**.......................................................................
+ * Set a binary value decoded from erlang as the expression value
+ */
+void ExtractorErlang::setBinaryVal(ExpressionNode<bool>* root, std::string& key, 
+                                   char* buf, int* index,
+                                   bool includeMarker)
+{
+    size_t size=0;
+    unsigned char* ptr = EiUtil::getDataPtr(buf, index, size, includeMarker);
+
+    root->set_value(key, &ptr, DataType::UCHAR_PTR, size);
+
+    // And increment the pointer as if we read it
+
+    *index += includeMarker ? size : size + 5;
+}
+
+void ExtractorErlang::extract(const char* ptr, size_t size, ExpressionNode<bool>* root) 
+{
+    root->clear();
+
+    // First byte is the version
+
+    int index=1;
+    char* data = (char*)ptr;
+
+    if(!EiUtil::isList(data, &index)) {
+        ThrowRuntimeError("Binary data must contain a term_to_binary() formatted list");
+    }
+
+    unsigned nVal = EiUtil::getListHeader(data, &index);
+
+    //------------------------------------------------------------
+    // Iterate over the object, looking for fields
+    //------------------------------------------------------------
+
+    for(unsigned int i=0; i < nVal; i++) {
+
+        if(!EiUtil::isTuple(data, &index) || EiUtil::getTupleHeader(data, &index) != 2) {
+            ThrowRuntimeError("List must consist of {field, val} tuples: " << std::endl
+                              << ErlUtil::formatBinary((unsigned char*)data, size));
+        }
+
+        //------------------------------------------------------------
+        // First read the field key
+        //------------------------------------------------------------
+
+        std::vector<unsigned char> bin = EiUtil::getBinary(data, &index);
+        std::string key((char*)&bin[0]);
+
+	//------------------------------------------------------------
+	// Next up is the field value
+	//------------------------------------------------------------
+
+	//------------------------------------------------------------
+	// If this field is one of the fields in our filter, try to
+	// process the value
+	//------------------------------------------------------------
+
+        if(expr_fields_.find(key) != expr_fields_.end()) {
+
+            DataType::Type specType = expr_fields_[key];
+
+            //------------------------------------------------------------
+            // If there is no value for this field, do nothing
+            //------------------------------------------------------------
+            
+            if(EiUtil::isNil(data, &index)) {
+                continue;
+            
+                //------------------------------------------------------------
+                // Else set the appropriate value type for this field.
+                //
+                // We have to check the type every time because encoding
+                // can in priciple convert data of the same erlang type
+                // into different packed types.
+                //
+                // Thus we check the type specification for this field,
+                // and convert from whichever type was chosen to the
+                // appropriate type for our filter.
+                //------------------------------------------------------------
+                
+            } else {
+                
+                try {
+                
+                    switch (specType) {
+                    case DataType::UINT8:
+                    {
+                        uint8_t val = EiUtil::objectToUint8(data, &index);
+                        root->set_value(key, (void*)&val, specType);
+                    }
+                    break;
+                    case DataType::INT64:
+                    {
+                        int64_t val = EiUtil::objectToInt64(data, &index);
+                        root->set_value(key, (void*)&val, specType);
+                    }
+                    break;
+                    case DataType::UINT64:
+                    {
+                        uint64_t val = EiUtil::objectToUint64(data, &index);
+                        root->set_value(key, (void*)&val, DataType::UINT64);
+                    }
+                    break;
+                    case DataType::DOUBLE:
+                    {
+                        double val = EiUtil::objectToDouble(data, &index);
+                        root->set_value(key, (void*)&val, specType);
+                    }
+                    break;
+
+                    //------------------------------------------------------------
+                    // Type ANY means that the data for this field are
+                    // opaque.  We don't try to interpret these, but treat
+                    // them as binary blobs.  
+                    //
+                    // Because the value that they might be compared
+                    // against in a filter could also be a msgpack-ed
+                    // blob, we store the initial msgpack marker as well
+                    // as the data contents.  
+                    //
+                    // This means that comparisons like:
+                    //
+                    //   {const, msgpack:pack([1,2,{<<"junk">>}], [{format, jsx}])}
+                    //
+                    // with 
+                    // 
+                    //   {field, "field1", any}
+                    // 
+                    // will work correctly if field1 contains the same blob that
+                    // is msgpack formatted
+                    //------------------------------------------------------------
+
+                    case DataType::ANY:
+                    {
+                        setBinaryVal(root, key,  data, &index, true);
+                    }
+                    break;
+
+                    //------------------------------------------------------------
+                    // Other types that are identified as binary will be
+                    // unpacked as binaries and the contents compared
+                    //------------------------------------------------------------
+
+                    default:
+                    {
+                        setBinaryVal(root, key, data, &index, false);
+                    }
+                    break;
+                    }
+
+                } catch(std::runtime_error& err) {
+                    ThrowRuntimeError(err.what() 
+                                      << std::endl << "While processing field: " << key);
+                }
+
+            }
+
+            //------------------------------------------------------------
+            // Skip over the last object if we didn't parse its value
+            //------------------------------------------------------------
+
+        } else {
+
+            // TODO: Need a skip function like CmpUtil here.
+            // formatTerm() is a proxy since it reads over the data,
+            // but it does other things too that we don't need
+
+            EiUtil::formatTerm(data, &index);
+        }
+    }
+}

@@ -45,6 +45,10 @@ namespace eleveldb {
         bool isBinary(ERL_NIF_TERM term); 
         static bool isBinary(ErlNifEnv* env, ERL_NIF_TERM term);
 
+        bool isInspectableAsBinary();
+        bool isInspectableAsBinary(ERL_NIF_TERM term); 
+        static bool isInspectableAsBinary(ErlNifEnv* env, ERL_NIF_TERM term);
+
         bool isList();
         bool isList(ERL_NIF_TERM term); 
         static bool isList(ErlNifEnv* env, ERL_NIF_TERM term);
@@ -56,6 +60,10 @@ namespace eleveldb {
         bool isNumber();
         bool isNumber(ERL_NIF_TERM term); 
         static bool isNumber(ErlNifEnv* env, ERL_NIF_TERM term);
+
+        bool isBool();
+        bool isBool(ERL_NIF_TERM term); 
+        static bool isBool(ErlNifEnv* env, ERL_NIF_TERM term);
 
         // Return true if term is a string.  Returns true if term is a
         // valid atom or erlang string (ie, encoded as a list)
@@ -79,7 +87,7 @@ namespace eleveldb {
 
         std::string getAtom();
         std::string getAtom(ERL_NIF_TERM term);
-        static std::string getAtom(ErlNifEnv* env, ERL_NIF_TERM term);
+        static std::string getAtom(ErlNifEnv* env, ERL_NIF_TERM term, bool toLower=false);
 
         std::vector<unsigned char> getBinary();
         std::vector<unsigned char> getBinary(ERL_NIF_TERM term);

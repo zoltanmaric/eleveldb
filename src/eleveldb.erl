@@ -42,6 +42,7 @@
          parse_string/1,
          is_empty/1,
 	 encode/2,
+	 eniftest/1,
 	 current_usec/0]).
 
 %% for testing
@@ -343,6 +344,9 @@ do_streaming_fold_test1(StreamRef = {MsgRef, AckRef}, Fun, Acc) ->
     end.
 
 current_usec() ->
+    erlang:nif_error({error, not_loaded}).
+
+eniftest(_) ->
     erlang:nif_error({error, not_loaded}).
 
 parse_string(Bin) ->

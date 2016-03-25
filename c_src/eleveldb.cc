@@ -36,6 +36,7 @@
 #include "filter_parser.h"
 
 #include "CmpUtil.h"
+#include "EiUtil.h"
 #include "ErlUtil.h"
 
 #include "leveldb/db.h"
@@ -84,6 +85,7 @@ static ErlNifFunc nif_funcs[] =
     {"streaming_stop", 1, eleveldb::streaming_stop},
 
     {"current_usec",   0, eleveldb::currentMicroSeconds},
+    {"eniftest",       1, eleveldb::eniftest},
 };
 
 
@@ -1303,6 +1305,88 @@ currentMicroSeconds(
 {
   return enif_make_int64(env, getCurrentMicroSeconds());
 } // currentMicroSeconds
+
+    ERL_NIF_TERM
+eniftest(
+    ErlNifEnv* env,
+    int argc,
+    const ERL_NIF_TERM argv[])
+{
+    try {
+
+        std::vector<ERL_NIF_TERM> cells = ErlUtil::getTupleCells(env, argv[0]);
+        std::string atom  = ErlUtil::formatTerm(env, cells[0]);
+
+        //------------------------------------------------------------
+        // Test throwing exceptions from stdlib
+        //------------------------------------------------------------
+
+        if(atom == "vecbomb") {
+            std::vector<int> testVec(10);
+            testVec.at(20) = 1;
+        }
+
+        //------------------------------------------------------------
+        // Parse a msgpack-encoded map
+        //------------------------------------------------------------
+
+        if(atom == "msgpacktypeparse") {
+            std::vector<unsigned char> bin = ErlUtil::getBinary(env, cells[1]);
+
+            std::map<std::string, eleveldb::DataType::Type> 
+                fieldTypes = CmpUtil::parseMap((const char*)&bin[0], bin.size());
+            CmpUtil::printMap(fieldTypes);
+        }
+
+        //------------------------------------------------------------
+        // Parse a map encoded in ei
+        //------------------------------------------------------------
+
+        if(atom == "erlangtypeparse") {
+            std::vector<unsigned char> bin = ErlUtil::getBinary(env, cells[1]);
+
+            EiUtil eiUtil((char*)&bin[0]);
+
+            std::map<std::string, eleveldb::DataType::Type> 
+                fieldTypes = eiUtil.parseMap();
+            eiUtil.printMap(fieldTypes);
+        }
+        
+        //------------------------------------------------------------
+        // Check if something is a binary
+        //------------------------------------------------------------
+
+        if(atom == "bintest") {
+            COUT("Is binary: " << ErlUtil::isBinary(env, cells[1]));
+            COUT("Can be encoded as binary: " << ErlUtil::isInspectableAsBinary(env, cells[1]));
+        }
+
+        //------------------------------------------------------------
+        // Check if something is a string
+        //------------------------------------------------------------
+
+        if(atom == "strtest") {
+            COUT("Is string: " << ErlUtil::isString(env, cells[1]));
+        }
+
+        if(atom == "atomtest") {
+            COUT("Is atom: " << ErlUtil::isAtom(env, cells[1]));
+        }
+
+        if(atom == "booltest") {
+            COUT("Is bool: " << ErlUtil::isBool(env, cells[1]));
+        }
+
+        return enif_make_atom(env, "ok");
+        
+    } catch(std::runtime_error& err) {
+	ERL_NIF_TERM msg_str  = enif_make_string(env, err.what(), ERL_NIF_LATIN1);
+        return enif_make_tuple2(env, eleveldb::ATOM_ERROR, msg_str);
+    } catch(...) {
+	ERL_NIF_TERM msg_str  = enif_make_string(env, "Unhandled exception caught", ERL_NIF_LATIN1);
+        return enif_make_tuple2(env, eleveldb::ATOM_ERROR, msg_str);
+    }
+}
 
 ERL_NIF_TERM
 async_destroy(

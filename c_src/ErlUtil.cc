@@ -57,6 +57,32 @@ void ErlUtil::checkTerm()
         ThrowRuntimeError("No term has been set");
 }
 
+bool ErlUtil::isBool()
+{
+    checkTerm();
+    return isBool(term_);
+}
+
+bool ErlUtil::isBool(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return isBool(env_, term);
+}
+
+bool ErlUtil::isBool(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    if(isAtom(env, term)) {
+        std::string atom = getAtom(env, term, true);
+        if(atom == "true") {
+            return true;
+        } else if(atom == "false") {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool ErlUtil::isAtom()
 {
     checkTerm();
@@ -106,6 +132,28 @@ bool ErlUtil::isBinary(ERL_NIF_TERM term)
 bool ErlUtil::isBinary(ErlNifEnv* env, ERL_NIF_TERM term)
 {
     return enif_is_binary(env, term);
+}
+
+bool ErlUtil::isInspectableAsBinary()
+{
+    checkTerm();
+    return isInspectableAsBinary(term_);
+}
+
+bool ErlUtil::isInspectableAsBinary(ERL_NIF_TERM term)
+{
+    checkEnv();
+    return isInspectableAsBinary(env_, term_);
+}
+
+bool ErlUtil::isInspectableAsBinary(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    try {
+        getBinary(env, term);
+        return true;
+    } catch(...) {
+        return false;
+    }
 }
 
 bool ErlUtil::isTuple()
@@ -282,7 +330,7 @@ std::string ErlUtil::getAtom(ERL_NIF_TERM term)
     return getAtom(env_, term);
 }
 
-std::string ErlUtil::getAtom(ErlNifEnv* env, ERL_NIF_TERM term)
+std::string ErlUtil::getAtom(ErlNifEnv* env, ERL_NIF_TERM term, bool toLower)
 {
     unsigned len=0;
     if(!enif_get_atom_length(env, term, &len, ERL_NIF_LATIN1))
@@ -294,6 +342,11 @@ std::string ErlUtil::getAtom(ErlNifEnv* env, ERL_NIF_TERM term)
     if(!enif_get_atom(env, term, buf, sBuf.bufSize(), ERL_NIF_LATIN1))
         ThrowRuntimeError("Unable to encode atom");
         
+    if(toLower) {
+        for(unsigned i=0; i < len; i++)
+            buf[i] = tolower(buf[i]);
+    }
+    
     // At this point, buf will contain a null-terminated version of
     // the converted atom, and can be returned as the argument to
     // std::string() constructor

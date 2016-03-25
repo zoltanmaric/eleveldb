@@ -782,6 +782,8 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
     if(options_.useRangeFilter_) {
         if(options_.encodingType_ == Encoding::MSGPACK)
             extractor_ = new ExtractorMsgpack();
+        else if(options_.encodingType_ == Encoding::ERLANG)
+            extractor_ = new ExtractorErlang();
         else {
             ThrowRuntimeError("An invalid object encoding was specified");
         }
