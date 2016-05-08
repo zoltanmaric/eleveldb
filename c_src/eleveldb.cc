@@ -185,7 +185,7 @@ struct EleveldbOptions
     bool m_FadviseWillNeed;
 
     EleveldbOptions()
-        : m_EleveldbThreads(71),
+        : m_EleveldbThreads(71),  // reminder: 8Mbyte stack default per thread
           m_LeveldbImmThreads(0), m_LeveldbBGWriteThreads(0),
           m_LeveldbOverlapThreads(0), m_LeveldbGroomingThreads(0),
           m_TotalMemPercent(0), m_TotalMem(0),
@@ -217,12 +217,17 @@ class eleveldb_priv_data
 public:
     EleveldbOptions m_Opts;
     leveldb::HotThreadPool thread_pool;
+    leveldb::HotThreadPool aae_pool;
 
     explicit eleveldb_priv_data(EleveldbOptions & Options)
     : m_Opts(Options),
       thread_pool(Options.m_EleveldbThreads, "Eleveldb",
                   leveldb::ePerfElevelDirect, leveldb::ePerfElevelQueued,
-                  leveldb::ePerfElevelDequeued, leveldb::ePerfElevelWeighted)
+                  leveldb::ePerfElevelDequeued, leveldb::ePerfElevelWeighted),
+      aae_pool(3, "aae_nice",
+               leveldb::ePerfElevelDirect, leveldb::ePerfElevelQueued,
+               leveldb::ePerfElevelDequeued, leveldb::ePerfElevelWeighted, 1)
+
         {}
 
 private:
@@ -938,7 +943,15 @@ async_iterator_move(
 
         eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
 
-        if(false == priv.thread_pool.Submit(move_item))
+        bool ret_flag;
+
+        // put aae iterator on lower priority thread (where supported)
+        if (itr_ptr->m_Iter->m_Options.iterator_refresh)
+            ret_flag= priv.aae_pool.Submit(move_item);
+        else
+            ret_flag= priv.thread_pool.Submit(move_item);
+
+        if(false == ret_flag)
         {
             itr_ptr->ReleaseReuseMove();
             itr_ptr->reuse_move=NULL;
