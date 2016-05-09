@@ -14,10 +14,11 @@ class BigsetKey
 {
     enum KeyType
     {
-        KeyTypeInvalid = 0,
-        KeyTypeClock   = 'c',
-        KeyTypeElement = 'a',
-        KeyTypeEnd     = 'z'
+        KeyTypeInvalid      = 0,
+        KeyTypeClock        = 'c',
+        KeyTypeSetTombstone = 'd',
+        KeyTypeElement      = 'e',
+        KeyTypeEnd          = 'z'
     };
 
     KeyType  m_KeyType;
@@ -25,12 +26,15 @@ class BigsetKey
     Slice    m_Element;
     Slice    m_Actor;
     uint64_t m_Counter;
-    bool     m_IsTombstone;
 
 public:
     BigsetKey( Slice key );
 
+    KeyType GetKeyType() const { return m_KeyType; }
+
     bool IsClock() const { return KeyTypeClock == m_KeyType; }
+
+    bool IsSetTombstone() const { return KeyTypeSetTombstone == m_KeyType; }
 
     bool IsElement() const { return KeyTypeElement == m_KeyType; }
 
@@ -45,8 +49,6 @@ public:
     const Slice& GetElement() const { return m_Element; }
 
     uint64_t GetCounter() const { return m_Counter; }
-
-    bool GetTombstone() const { return m_IsTombstone; }
 };
 
 } // namespace bigset

@@ -7,7 +7,9 @@
 
 #include <cstddef>
 #include <cstring>
+#include <cstdio>
 #include <stdexcept>
+#include <string>
 
 #include <leveldb/slice.h>
 
@@ -336,6 +338,65 @@ public:
 
     bool operator==( const Slice& Data ) const { return 0 == Compare( Data ); }
     bool operator!=( const Slice& Data ) const { return 0 != Compare( Data ); }
+
+    ///////////////////////////////////
+    // Utility Methods
+
+    enum ToStringOption
+    {
+        FormatAsText,
+        FormatAsBinaryDecimal, // print a list of comma-separated decimals, similar to an Erlang binary dump
+        FormatAsBinaryHex      // print a list of space-separated hexadecimal values
+    };
+
+    // returns a human-readable string; length is based on the bytes used
+    std::string ToString( ToStringOption Option = FormatAsText, char ReplacementForUnprintable = 0 ) const
+    {
+        // if the caller did not specify a replacement for unprintable
+        // characters, use the space character
+        if ( 0 == ReplacementForUnprintable )
+        {
+            ReplacementForUnprintable = ' ';
+        }
+
+        std::string retVal;
+        retVal.reserve( (FormatAsText == Option) ? m_BytesUsed : 3 * m_BytesUsed ); // avoid a bunch of re-allocs
+        for ( size_t j = 0; j < m_BytesUsed; ++j )
+        {
+            // get the next character from our buffer, format it, and write it to the output string
+            char c = m_pBuff[j];
+            if ( FormatAsText == Option )
+            {
+                // if this is a printable character (between 0x20 and 0x7e, inclusive),
+                // use it as-is, else use ReplacementForUnprintable
+                if ( c < 0x20 || c > 0x7e )
+                {
+                    c = ReplacementForUnprintable;
+                }
+                retVal.push_back( c );
+            }
+            else
+            {
+                char buff[8]; // need at most 3 chars (plus null terminator) to represent a char as an integer; only need 2 for hex; also allow for separator char
+                const char* formatStr = NULL;
+                if ( FormatAsBinaryDecimal == Option )
+                {
+                    formatStr = retVal.empty() ? "%u" : ",%u";
+                }
+                else if ( FormatAsBinaryHex == Option )
+                {
+                    formatStr = retVal.empty() ? "%02X" : " %02X";
+                }
+                else
+                {
+                    throw std::invalid_argument( "unknown format option" );
+                }
+                ::snprintf( buff, sizeof buff, formatStr, (unsigned int)((unsigned char)c) ); // the casts ensure we don't get a sign extension
+                retVal.append( buff );
+            }
+        }
+        return retVal;
+    }
 };
 
 } // namespace utils

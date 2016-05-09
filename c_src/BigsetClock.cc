@@ -61,22 +61,19 @@ std::string Actor::ToString() const
 /////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////
 
-bool VersionVector::AddPair( const Actor& Act, Counter Event, bool IsTombstone )
+bool VersionVector::AddPair( const Actor& Act, Counter Event )
 {
-    bool retVal = false;
-    if ( !IsTombstone )
+    // try to insert this actor/event pair into our map
+    std::pair<ActorToCounterMapIterator, bool> result = m_Pairs.insert( std::pair<Actor, Counter>( Act, Event ) );
+    bool retVal = result.second;
+    if ( !retVal )
     {
-        std::pair<ActorToCounterMapIterator, bool> result = m_Pairs.insert( std::pair<Actor, Counter>( Act, Event ) );
-        retVal = result.second;
-        if ( !retVal )
+        // the Actor is already in the map, so see if the incoming Event
+        // value is larger than the one in the map
+        if ( (*result.first).second < Event )
         {
-            // the Actor is already in the map, so see if the incoming Event
-            // value is larger than the one in the map
-            if ( (*result.first).second < Event )
-            {
-                (*result.first).second = Event;
-                retVal = true;
-            }
+            (*result.first).second = Event;
+            retVal = true;
         }
     }
     return retVal;

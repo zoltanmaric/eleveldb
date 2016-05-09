@@ -2,7 +2,7 @@
 // Created by Paul A. Place on 1/11/16.
 //
 
-#include <buffer.h>
+#include <utils.h>
 #include <gtest/gtest.h>
 
 using namespace basho::utils;
@@ -443,4 +443,49 @@ TEST(Buffer, Compare)
     ASSERT_TRUE( buff == sliceEQ );
     ASSERT_TRUE( buff != sliceLT );
     ASSERT_TRUE( buff != sliceGT );
+}
+
+struct ToStringTestCase
+{
+    const char* m_Input;
+    size_t      m_InputChars; // can't use strlen(m_Input) since embedded nulls and escape chars throw off the character count
+    const char* m_ExpectedTextOutput;
+    const char* m_ExpectedBinaryDecimalOutput;
+    const char* m_ExpectedBinaryHexOutput;
+};
+
+ToStringTestCase g_ToStringTestCases[] =
+{
+    { "", 0, "", "", "" },
+    { "a", 1, "a", "97", "61" },
+    { "A", 1, "A", "65", "41" },
+    { "abc ABC", 7, "abc ABC", "97,98,99,32,65,66,67", "61 62 63 20 41 42 43" },
+    { "\t", 1, " ", "9", "09" },
+    { "abc\x19 ABC\x7f", 9, "abc  ABC ", "97,98,99,25,32,65,66,67,127", "61 62 63 19 20 41 42 43 7F" },
+    { "\x00\xff\x01\xfe This is some more text.", 28, "     This is some more text.",
+        "0,255,1,254,32,84,104,105,115,32,105,115,32,115,111,109,101,32,109,111,114,101,32,116,101,120,116,46",
+        "00 FF 01 FE 20 54 68 69 73 20 69 73 20 73 6F 6D 65 20 6D 6F 72 65 20 74 65 78 74 2E" }
+};
+TEST(Buffer, ToString)
+{
+    const size_t BUILTIN_BUFF_SIZE = 8;
+    Buffer<BUILTIN_BUFF_SIZE> buff;
+
+    std::string formattedStr;
+    for ( int j = 0; j < COUNTOF(g_ToStringTestCases); ++j )
+    {
+        buff.Assign( g_ToStringTestCases[j].m_Input, g_ToStringTestCases[j].m_InputChars );
+
+        formattedStr = buff.ToString();
+        ASSERT_STREQ( g_ToStringTestCases[j].m_ExpectedTextOutput, formattedStr.c_str() );
+
+        formattedStr = buff.ToString( Buffer<BUILTIN_BUFF_SIZE>::FormatAsText );
+        ASSERT_STREQ( g_ToStringTestCases[j].m_ExpectedTextOutput, formattedStr.c_str() );
+
+        formattedStr = buff.ToString( Buffer<BUILTIN_BUFF_SIZE>::FormatAsBinaryDecimal );
+        ASSERT_STREQ( g_ToStringTestCases[j].m_ExpectedBinaryDecimalOutput, formattedStr.c_str() );
+
+        formattedStr = buff.ToString( Buffer<BUILTIN_BUFF_SIZE>::FormatAsBinaryHex );
+        ASSERT_STREQ( g_ToStringTestCases[j].m_ExpectedBinaryHexOutput, formattedStr.c_str() );
+    }
 }

@@ -824,7 +824,7 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
         if (!options.isBigsetActorSet_) {
             ThrowRuntimeError("Bigsets flag is set but no actor ID was specified");
         }
-        bigset_acc_.reset( new basho::bigset::BigsetAccumulator( options_.bigsetActor_ ) );
+        bigset_acc_.reset( new basho::bigset::BigsetAccumulator( options_.bigsetActor_, m_DbPtr->m_Db->GetLogger() ) );
     }
     
     if(!sync_obj_) {
@@ -1113,11 +1113,14 @@ work_result RangeScanTask::operator()()
                 if ( !bigset_acc_->AddRecord( key, value ) )
                 {
                     // TODO: we didn't find a clock for the specified actor, so return "not found" (or maybe just break out of the loop?)
+                    throw std::runtime_error( "RangeScanTask: BigsetAccumulator::AddRecord() returned false" );
                 }
             }
             catch ( std::runtime_error& ex )
             {
                 // TODO: ensure this is the correct handling of an error
+                leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                              "RangeScanTask: error adding record %llu: %s", recordsConsidered, ex.what() );
                 sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, ex.what() );
                 return work_result( local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR );
             }

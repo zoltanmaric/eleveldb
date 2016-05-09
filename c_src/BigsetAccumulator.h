@@ -7,6 +7,7 @@
 
 #include <list>
 
+#include <leveldb/env.h>
 #include "BigsetClock.h"
 
 namespace basho {
@@ -14,28 +15,29 @@ namespace bigset {
 
 class BigsetAccumulator
 {
-private:
-    Actor       m_ThisActor;
-    Buffer      m_CurrentSetName;
-    Buffer      m_CurrentElement;
-    BigsetClock m_CurrentContext;
-    DotList     m_CurrentDots;
+    leveldb::Logger* m_pLogger;
+    Actor            m_ThisActor;
+    Buffer           m_CurrentSetName;
+    Buffer           m_CurrentElement;
+    BigsetClock      m_SetTombstone;
+    DotList          m_CurrentDots;
 
-    Buffer      m_ReadyKey;
-    Buffer      m_ReadyValue;
-    bool        m_ElementReady;
-    bool        m_ActorClockReady;
-    bool        m_ActorClockSeen;
-    bool        m_ErlangBinaryFormat; // true => the entire blob we return is in erlang's external term format; else it's in the traditional list of length-prefixed KV pairs
+    Buffer           m_ReadyKey;
+    Buffer           m_ReadyValue;
+    bool             m_ElementReady;
+    bool             m_ActorClockReady;
+    bool             m_ActorClockSeen;
+    bool             m_ActorSetTombstoneSeen;
+    bool             m_ErlangBinaryFormat; // true => the entire blob we return is in erlang's external term format; else it's in the traditional list of length-prefixed KV pairs
 
     void FinalizeElement();
 
 public:
-    BigsetAccumulator( const Actor& ThisActor ) : m_ThisActor( ThisActor ),
-                                                  m_ElementReady( false ),
-                                                  m_ActorClockReady( false ),
-                                                  m_ActorClockSeen( false ),
-                                                  m_ErlangBinaryFormat( true ) // TODO: make this a parameter?
+    BigsetAccumulator( const Actor& ThisActor, leveldb::Logger* pLogger )
+        : m_pLogger( pLogger ),
+          m_ThisActor( ThisActor ), m_ElementReady( false ),
+          m_ActorClockReady( false ), m_ActorClockSeen( false ),
+          m_ActorSetTombstoneSeen( false ), m_ErlangBinaryFormat( false ) // TODO: make this a parameter?
     { }
 
     ~BigsetAccumulator() { }
@@ -59,24 +61,7 @@ public:
     }
 
     void
-    GetCurrentElement( Slice& key, Slice& value )
-    {
-        if ( m_ElementReady )
-        {
-            Slice readyKey( m_ReadyKey.GetCharBuffer(), m_ReadyKey.GetBytesUsed() );
-            key = readyKey;
-
-            Slice readyValue( m_ReadyValue.GetCharBuffer(), m_ReadyValue.GetBytesUsed() );
-            value = readyValue;
-
-            m_ElementReady = false; // prepare for the next element
-        }
-        else if ( m_ActorClockReady )
-        {
-            // we send the key/value back to the caller as-is
-            m_ActorClockReady = false;
-        }
-    }
+    GetCurrentElement( Slice& key, Slice& value );
 };
 
 } // namespace bigset

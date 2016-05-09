@@ -7,7 +7,7 @@ namespace bigset {
 void
 BigsetAccumulator::FinalizeElement()
 {
-    m_CurrentContext.SubtractSeen( m_CurrentDots );
+    m_SetTombstone.SubtractSeen( m_CurrentDots );
     if ( !m_CurrentDots.IsEmpty() )
     {
         // this element is "in" the set locally
@@ -22,9 +22,9 @@ BigsetAccumulator::FinalizeElement()
             throw std::runtime_error( "Failed to assign current dots to ready value" );
         }
         m_ElementReady = true;
+        leveldb::Log( m_pLogger, "BigsetAccumulator::FinalizeElement: processed element key '%s' with %zu dot", m_ReadyKey.ToString().c_str(), m_CurrentDots.Size() );
     }
     m_CurrentElement.ResetBuffer();
-    m_CurrentContext.Clear();
     m_CurrentDots.Clear();
 }
 
@@ -55,6 +55,8 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
             throw std::runtime_error( "Unexpected set name change" );
         }
 
+        //leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processing key type '%c' for set '%s' with value size %zu", (char)keyToAdd.GetKeyType(), m_CurrentSetName.ToString().c_str(), value.size() );
+
         if ( keyToAdd.IsClock() )
         {
             // we have a clock key; see if it's for the actor we're tracking; if not, we ignore this clock
@@ -69,6 +71,29 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                 }
                 m_ActorClockReady = true;
                 m_ActorClockSeen = true;
+
+                leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processed clock key for set '%s' with value size %zu", m_CurrentSetName.ToString().c_str(), value.size() );
+                utils::Buffer<100> valueBuff;
+                if ( valueBuff.Assign( value ) )
+                {
+                    leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: clock key value: '%s'", valueBuff.ToString( utils::Buffer<100>::FormatAsBinaryDecimal ).c_str() );
+                }
+            }
+        }
+        else if ( keyToAdd.IsSetTombstone() )
+        {
+            // we have a set tombstone key; see if it's for the actor we're tracking; if not, we ignore this set tombstone
+            if ( m_ThisActor == keyToAdd.GetActor() )
+            {
+                if ( m_ActorSetTombstoneSeen )
+                {
+                    // we should only see one set tombstone for a given actor
+
+                    // TODO: log an error about the unexpected second instance of a set tombstone for this actor
+                    throw std::runtime_error( "Unexpected second set tombstone found for actor" );
+                }
+                m_ActorSetTombstoneSeen = true;
+                leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processed set tombstone key" );
             }
         }
         else if ( keyToAdd.IsElement() )
@@ -76,7 +101,9 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
             // ensure we've seen the clock for the desired actor
             if ( !m_ActorClockSeen )
             {
-                // TODO: log a message that we did not see a clock for the specified actor; the erlang code treats this condition as "not found"
+                // log a message that we did not see a clock for the specified actor;
+                // the erlang code treats this condition as "not found"
+                leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord(WARN): actor clock not seen before element record" );
                 return false;
             }
 
@@ -84,11 +111,11 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
             const Slice& element( keyToAdd.GetElement() );
             if ( !m_CurrentElement.IsEmpty() && m_CurrentElement != element )
             {
-                // we are starting a new element, so finish processing of the previous element
+                // we are starting a new element, so finish processing the previous element
                 FinalizeElement();
             }
 
-            // accumulate values
+            // save the value of this element and accumulate its dots
             if ( m_CurrentElement.IsEmpty() )
             {
                 if ( !m_CurrentElement.Assign( element ) )
@@ -98,19 +125,6 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                 }
             }
 
-            BigsetClock currentClock;
-            std::string error;
-            if ( !BigsetClock::ValueToBigsetClock( value, currentClock, error ) )
-            {
-                // TODO: log an error about converting value to a bigset clock
-                throw std::runtime_error( "Unable to convert binary to bigset clock" );
-            }
-            if ( !m_CurrentContext.Merge( currentClock ) )
-            {
-                // TODO: log an error about merging bigset clocks
-                throw std::runtime_error( "Unable to merge bigset clocks" );
-            }
-
             Actor actor;
             if ( !actor.SetId( keyToAdd.GetActor() ) )
             {
@@ -118,19 +132,19 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                 throw std::runtime_error( "Unable to set actor ID" );
             }
             m_CurrentDots.AddPair( actor,
-                                   keyToAdd.GetCounter(),
-                                   keyToAdd.GetTombstone() );
+                                   keyToAdd.GetCounter() );
         }
         else if ( keyToAdd.IsEnd() )
         {
             // this is an end key, so we're done enumerating the elements in this
             // bigset, and we need to finish processing the previous element
             FinalizeElement();
+            leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processed end key" );
         }
         else
         {
             // oops, we weren't expecting this
-            // TODO: log an error and handle unexpected key type
+            leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord(ERR): unexpected key type" );
             throw std::runtime_error( "Unexpected key type" );
         }
     }
@@ -140,6 +154,30 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
         throw std::runtime_error( "Unable to parse key" );
     }
     return true;
+}
+
+void
+BigsetAccumulator::GetCurrentElement( Slice& key, Slice& value )
+{
+    if ( m_ElementReady )
+    {
+        Slice readyKey( m_ReadyKey.GetCharBuffer(), m_ReadyKey.GetBytesUsed() );
+        key = readyKey;
+
+        Slice readyValue( m_ReadyValue.GetCharBuffer(), m_ReadyValue.GetBytesUsed() );
+        value = readyValue;
+
+        m_ElementReady = false; // prepare for the next element
+
+        //leveldb::Log( m_pLogger, "BigsetAccumulator::GetCurrentElement: returning element; key size=%zu, value size=%zu", key.size(), value.size() );
+    }
+    else if ( m_ActorClockReady )
+    {
+        // we send the key/value back to the caller as-is
+        m_ActorClockReady = false;
+
+        //leveldb::Log( m_pLogger, "BigsetAccumulator::GetCurrentElement: returning clock; key size=%zu, value size=%zu", key.size(), value.size() );
+    }
 }
 
 } // namespace bigset

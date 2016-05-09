@@ -184,11 +184,7 @@ public:
     // already present in the version vector, updates the stored event count
     // iff the caller's Event value is larger than the stored value; returns
     // true if the pair is added/updated, else false
-    bool AddPair( const Actor& Act, Counter Event, bool IsTombstone );
-    bool AddPair( const Actor& Act, Counter Event )
-    {
-        return AddPair( Act, Event, false );
-    }
+    bool AddPair( const Actor& Act, Counter Event );
 
     void Clear() { m_Pairs.clear(); }
 

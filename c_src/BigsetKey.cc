@@ -115,13 +115,6 @@ static uint64_t GetCounter( Slice& s )
     return actual;
 }
 
-static Slice GetTsb( Slice& s )
-{
-    Slice res = Slice( s.data(), 1 ); // one byte a or r
-    s.remove_prefix( 1 );
-    return res;
-}
-
 static Slice GetKeyType( Slice& s )
 {
     Slice res = Slice( s.data(), 1 ); // one byte c, e, or z
@@ -135,30 +128,37 @@ static Slice GetKeyType( Slice& s )
 //
 // Clock keys are:
 //  <<
-//    SetNameLen:32/little-unsigned-integer, %% the lengthof the set name
-//    SetName:SetNameLen/binary, %% Set name for bytewise comparison
-//    $c, %% means clock
+//    SetNameLen:32/little-unsigned-integer, %% the length of the set name
+//    SetName:SetNameLen/binary, %% Set name for byte-wise comparison
+//    $c:1/binary, %% means clock
+//    Actor/binary, %% The actual actor
+//    >>
+//
+// Set Tombstone keys are:
+//  <<
+//    SetNameLen:32/little-unsigned-integer, %% the length of the set name
+//    SetName:SetNameLen/binary, %% Set name for byte-wise comparison
+//    $d:1/binary, %% means set tombstone
 //    Actor/binary, %% The actual actor
 //    >>
 //
 // Element keys are:
 //  <<
 //    SetNameLen:32/little-unsigned-integer, %% the length of the set name
-//    SetName:SetNameLen/binary, %% Set name for bytewise comparison
-//    $e, % indicates an element
+//    SetName:SetNameLen/binary, %% Set name for byte-wise comparison
+//    $e:1/binary, %% indicates an element
 //    ElementLen:32/little-unsigned-integer, %% Length of the element
 //    Element:ElementLen/binary, %% The actual element
 //    ActorLen:32/little-unsigned-integer, %% Length of the actor ID
 //    Actor:ActorLen/binary, %% The actual actor
-//    Counter:64/little-unsigned-integer,
-//    $a | $r:8/binary, %% a|r single byte char to determine if the key is an add or a tombstone
+//    Counter:64/little-unsigned-integer
 //    >>
 //
 //  End Key is:
 //  <<
-//    SetNameLen:32/little-unsigned-integer, %% the lengthof the set name
-//    SetName:SetNameLen/binary, %% Set name for bytewise comparison
-//    $z, %% means end key, used for limiting streaming fold
+//    SetNameLen:32/little-unsigned-integer, %% the length of the set name
+//    SetName:SetNameLen/binary, %% Set name for byte-wise comparison
+//    $z:1/binary, %% means end key, used for limiting streaming fold
 //    >>
 BigsetKey::BigsetKey( Slice key )
 {
@@ -168,6 +168,10 @@ BigsetKey::BigsetKey( Slice key )
     {
         case 'c':
             m_KeyType = KeyTypeClock;
+            break;
+
+        case 'd':
+            m_KeyType = KeyTypeSetTombstone;
             break;
 
         case 'e':
@@ -183,7 +187,7 @@ BigsetKey::BigsetKey( Slice key )
             break;
     }
 
-    if ( IsClock() )
+    if ( IsClock() | IsSetTombstone() )
     {
         // actor is the remaining portion of the key (not length-prefixed)
         m_Actor = key;
@@ -193,7 +197,6 @@ BigsetKey::BigsetKey( Slice key )
         m_Element     = internal::Get32PrefData( key );
         m_Actor       = internal::Get32PrefData( key );
         m_Counter     = internal::GetCounter( key );
-        m_IsTombstone = ('r' == internal::GetTsb( key )[0]);
     }
 }
 } // namespace bigset
