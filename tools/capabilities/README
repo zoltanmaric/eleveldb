@@ -1,0 +1,16 @@
+This directory contains compiler/linker/runtime capability tests.
+
+Programs here test one of two things:
+
+- Compile/link or not:
+  to test basic compiler capabilities or the presence of system-specific
+  header files or library symbols
+
+- Run successfully or not:
+  to test whether some compiler/library feature behaves as expected
+
+These are used ONLY to determine how to build this package, none of the test
+code is part of the resulting package.
+
+C files are generally legal C++, and are symlinked as such, to keep
+compilers happy.

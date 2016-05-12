@@ -1,6 +1,7 @@
 # transient
 /.cache/
 /work/
+/_build/
 
 # artifacts
 /priv/*.so
