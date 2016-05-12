@@ -1,13 +1,11 @@
-.eunit/*
-deps/*
-priv/*
-*.o
-*.beam
-*.d
-ebin
-c_src/leveldb/
-c_src/snappy*/
-c_src/system
+# transient
+/.cache/
+/work/
+
+# artifacts
+/priv/*.so
+/priv/*_x86_64
+
+# editor droppings
+*.bak
 *~
-.local_dialyzer_plt
-.rebar
