@@ -451,17 +451,22 @@ ItrObject::RetrieveItrObject(
 
     ret_ptr=NULL;
 
+    leveldb::gPerfCounters->Inc(leveldb::ePerfDebug0);
     if (enif_get_resource(Env, ItrTerm, m_Itr_RESOURCE, (void **)&itr_ptr_ptr))
     {
         ret_ptr=*itr_ptr_ptr;
+        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug1);
 
         if (NULL!=ret_ptr)
         {
+            leveldb::gPerfCounters->Inc(leveldb::ePerfDebug2);
+
             // has close been requested?
             if (ret_ptr->m_CloseRequested
                 || (!ItrClosing && ret_ptr->m_DbPtr->m_CloseRequested))
             {
                 // object already closing
+                leveldb::gPerfCounters->Inc(leveldb::ePerfDebug3);
                 ret_ptr=NULL;
             }   // if
         }   // if
@@ -483,12 +488,10 @@ ItrObject::ItrObjectResourceCleanup(
     erl_ptr=(ItrObject * volatile *)Arg;
     itr_ptr=*erl_ptr;
 
-    leveldb::gPerfCounters->Inc(leveldb::ePerfDebug3);
     // is Erlang first to initiate close?
     if (leveldb::compare_and_swap(erl_ptr, itr_ptr, (ItrObject *)NULL)
         && NULL!=itr_ptr)
     {
-        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug4);
         itr_ptr->InitiateCloseRequest();
     }   // if
 

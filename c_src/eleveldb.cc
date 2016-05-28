@@ -1015,7 +1015,7 @@ async_iterator_close(
 
     if(NULL==itr_ptr.get() || 0!=itr_ptr->m_CloseRequested)
     {
-       leveldb::gPerfCounters->Inc(leveldb::ePerfDebug0);
+       leveldb::gPerfCounters->Inc(leveldb::ePerfDebug4);
        return enif_make_badarg(env);
     }
 
@@ -1031,7 +1031,6 @@ async_iterator_close(
 
         if(false == priv.thread_pool.Submit(work_item))
         {
-            leveldb::gPerfCounters->Inc(leveldb::ePerfDebug1);
             delete work_item;
             return send_reply(env, caller_ref, enif_make_tuple2(env, ATOM_ERROR, caller_ref));
         }   // if
@@ -1040,7 +1039,6 @@ async_iterator_close(
     // this close/cleanup call is way late ... bad programmer!
     else
     {
-        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug2);
         return send_reply(env, caller_ref, error_einval(env));
     }   // else
 

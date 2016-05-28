@@ -24,6 +24,7 @@
 #define INCL_WORKITEMS_H
 
 #include <stdint.h>
+#include <syslog.h>
 
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
