@@ -784,9 +784,8 @@ async_iterator_move(
 
     if(NULL==itr_ptr.get() || 0!=itr_ptr->m_CloseRequested)
     {
-        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug3);
         return enif_make_badarg(env);
-    }
+    }   // if
 
     // Reuse ref from iterator creation
     const ERL_NIF_TERM& caller_ref = itr_ptr->itr_ref;

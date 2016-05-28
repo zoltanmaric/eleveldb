@@ -483,13 +483,13 @@ ItrObject::ItrObjectResourceCleanup(
     erl_ptr=(ItrObject * volatile *)Arg;
     itr_ptr=*erl_ptr;
 
+    leveldb::gPerfCounters->Inc(leveldb::ePerfDebug3);
     // is Erlang first to initiate close?
     if (leveldb::compare_and_swap(erl_ptr, itr_ptr, (ItrObject *)NULL)
         && NULL!=itr_ptr)
     {
-        itr_ptr->InitiateCloseRequest();
-
         leveldb::gPerfCounters->Inc(leveldb::ePerfDebug4);
+        itr_ptr->InitiateCloseRequest();
     }   // if
 
     return;
