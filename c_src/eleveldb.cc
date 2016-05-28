@@ -1016,7 +1016,10 @@ async_iterator_close(
 
     if(NULL==itr_ptr.get() || 0!=itr_ptr->m_CloseRequested)
     {
-       leveldb::gPerfCounters->Inc(leveldb::ePerfDebug0);
+       if (NULL==itr_ptr.get())
+           leveldb::gPerfCounters->Inc(leveldb::ePerfDebug0);
+       else
+           leveldb::gPerfCounters->Inc(leveldb::ePerfDebug4);
        return enif_make_badarg(env);
     }
 
