@@ -488,6 +488,8 @@ ItrObject::ItrObjectResourceCleanup(
         && NULL!=itr_ptr)
     {
         itr_ptr->InitiateCloseRequest();
+
+        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug4);
     }   // if
 
     return;
