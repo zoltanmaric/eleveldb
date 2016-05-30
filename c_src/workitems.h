@@ -288,7 +288,7 @@ protected:
         ERL_NIF_TERM result = enif_make_resource(local_env(), itr_ptr_ptr);
 
         // release reference created during CreateItrObject()
-        enif_release_resource(itr_ptr_ptr);
+        //enif_release_resource(itr_ptr_ptr);
 
         return work_result(local_env(), ATOM_OK, result);
     }

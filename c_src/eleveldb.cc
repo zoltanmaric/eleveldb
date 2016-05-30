@@ -1006,6 +1006,7 @@ async_iterator_close(
     int argc,
     const ERL_NIF_TERM argv[])
 {
+    void * volatile * erlang_ptr;
     const ERL_NIF_TERM& caller_ref  = argv[0];
     const ERL_NIF_TERM& itr_ref     = argv[1];
 
@@ -1019,10 +1020,13 @@ async_iterator_close(
        return enif_make_badarg(env);
     }
 
+    erlang_ptr=itr_ptr->m_ErlangThisPtr;
+
     // verify that Erlang has not called ItrObjectResourceCleanup AND
     //  that a database close has not already started death proceedings
     if (itr_ptr->ClaimCloseFromCThread())
     {
+        enif_release_resource((void *)erlang_ptr);
         eleveldb::WorkTask *work_item = new eleveldb::ItrCloseTask(env, caller_ref,
                                                                    itr_ptr.get());
 
