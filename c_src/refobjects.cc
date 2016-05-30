@@ -336,6 +336,7 @@ DbObject::Shutdown()
         {
             // follow protocol, only one thread calls Initiate
 //            if (leveldb::compare_and_swap(itr_ptr->m_ErlangThisPtr, itr_ptr, (ItrObject *)NULL))
+            leveldb::gPerfCounters->Inc(leveldb::ePerfDebug3);
             if (itr_ptr->ClaimCloseFromCThread())
                 itr_ptr->ItrObject::InitiateCloseRequest();
         }   // if
@@ -466,7 +467,6 @@ ItrObject::RetrieveItrObject(
                 || (!ItrClosing && ret_ptr->m_DbPtr->m_CloseRequested))
             {
                 // object already closing
-                leveldb::gPerfCounters->Inc(leveldb::ePerfDebug3);
                 ret_ptr=NULL;
             }   // if
         }   // if
