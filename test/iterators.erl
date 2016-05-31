@@ -40,7 +40,8 @@ iterator_test_() ->
         seek_and_prefetch_test_case(Ref),
         aae_prefetch1(Ref),
         aae_prefetch2(Ref),
-        aae_prefetch3(Ref)
+        aae_prefetch3(Ref),
+        close_after_db_test_case(Ref)
        ]
        end}]
     }.
@@ -55,7 +56,7 @@ setup() ->
     Ref.
 
 cleanup(Ref) ->
-      eleveldb:close(Ref).
+      catch eleveldb:close(Ref).
 
 prev_test_case(Ref) ->
     fun() ->
@@ -144,3 +145,11 @@ aae_prefetch3(Ref) ->
     end.
 
 -endif.
+
+close_after_db_test_case(Ref) ->
+    fun() ->
+        {ok, I} = eleveldb:iterator(Ref, []),
+        ?assertEqual(ok, eleveldb:close(Ref)),
+        {Error, Reason, _StackTrace} = eleveldb:iterator_close(I),
+        ?assertEqual({error, badarg}, {Error, Reason})
+    end.

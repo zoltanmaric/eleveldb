@@ -140,10 +140,12 @@ open(Name, Opts) ->
 -spec close(db_ref()) -> ok | {error, any()}.
 close(Ref) ->
     CallerRef = make_ref(),
-    Result = case async_close(CallerRef, Ref) of
+    Result = try async_close(CallerRef, Ref) of
         ok ->
             ?WAIT_FOR_REPLY(CallerRef);
         E  -> E
+     catch Err:Reason ->
+        {Err, Reason, erlang:get_stacktrace()}
     end,
     case Result of
         ok -> Result;
@@ -233,10 +235,12 @@ iterator_move(_IRef, _Loc) ->
 -spec iterator_close(itr_ref()) -> ok.
 iterator_close(IRef) ->
     CallerRef = make_ref(),
-    Result = case async_iterator_close(CallerRef, IRef) of
+    Result = try async_iterator_close(CallerRef, IRef) of
         ok ->
             ?WAIT_FOR_REPLY(CallerRef);
         E  -> E
+    catch Err:Reason ->
+        {Err, Reason, erlang:get_stacktrace()}
     end,
     case Result of
         ok -> Result;
