@@ -233,7 +233,7 @@ iterator_move(_IRef, _Loc) ->
     end.
 
 -spec iterator_close(itr_ref()) -> ok.
-iterator_close(IRef) ->
+iterator_close(IRef) when is_binary(IRef) ->
     CallerRef = make_ref(),
     Result = try async_iterator_close(CallerRef, IRef) of
         ok ->
@@ -247,6 +247,12 @@ iterator_close(IRef) ->
         Error ->
             lager:error("Failed to close leveldb iterator. Error was ~p", [Error]),
             Result
+    end;
+iterator_close(_InvalidRef) ->
+    try
+        erlang:error(badarg)
+    catch E:R ->
+        {E, R, erlang:get_stacktrace()}
     end.
 
 async_iterator_close(_CallerRef, _IRef) ->
