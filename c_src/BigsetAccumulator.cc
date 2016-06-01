@@ -72,12 +72,12 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                 m_ActorClockReady = true;
                 m_ActorClockSeen = true;
 
+                //utils::Buffer<100> valueBuff;
+                //if ( valueBuff.Assign( value ) )
+                //{
+                //    leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: clock key value: '%s'", valueBuff.ToString( utils::Buffer<100>::FormatAsBinaryDecimal ).c_str() );
+                //}
                 leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processed clock key for set '%s' with value size %zu", m_CurrentSetName.ToString().c_str(), value.size() );
-                utils::Buffer<100> valueBuff;
-                if ( valueBuff.Assign( value ) )
-                {
-                    leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: clock key value: '%s'", valueBuff.ToString( utils::Buffer<100>::FormatAsBinaryDecimal ).c_str() );
-                }
             }
         }
         else if ( keyToAdd.IsSetTombstone() )
@@ -92,8 +92,19 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                     // TODO: log an error about the unexpected second instance of a set tombstone for this actor
                     throw std::runtime_error( "Unexpected second set tombstone found for actor" );
                 }
+
+                std::string error;
+                if ( !BigsetClock::ValueToBigsetClock( value, m_SetTombstone, error ) )
+                {
+                    std::string msg( "Error parsing set tombstone value: " );
+                    msg += error;
+                    throw std::runtime_error( msg );
+                }
+
                 m_ActorSetTombstoneSeen = true;
-                leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processed set tombstone key" );
+                leveldb::Log( m_pLogger,
+                              "BigsetAccumulator::AddRecord: processed set tombstone key; version vector count=%zu, dot cloud count=%zu ",
+                              m_SetTombstone.GetVersionVectorCount(), m_SetTombstone.GetDotCloudCount() );
             }
         }
         else if ( keyToAdd.IsElement() )

@@ -386,6 +386,12 @@ public:
     std::string
     ToString() const;
 
+    // returns the count of items in the version vector
+    size_t GetVersionVectorCount() const { return m_VersionVector.Size(); }
+
+    // returns the count of items in the dot cloud
+    size_t GetDotCloudCount() const { return m_DotCloud.Size(); }
+
 private:
     // helper methods used by ValueToBigsetClock()
     //
