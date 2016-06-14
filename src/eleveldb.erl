@@ -124,9 +124,7 @@ init() ->
                          {delete_threshold, pos_integer()} |
                          {tiered_slow_level, pos_integer()} |
                          {tiered_fast_prefix, string()} |
-                         {tiered_slow_prefix, string()} |
-                         {bigsets, boolean()} |
-                         {vnode, binary()}].
+                         {tiered_slow_prefix, string()}].
 
 -type read_option() :: {verify_checksums, boolean()} |
                        {fill_cache, boolean()}.
@@ -147,7 +145,7 @@ init() ->
 
 -type streaming_option() :: {max_batch_bytes, pos_integer()} |
                             {max_unacked_bytes, pos_integer() |
-			    {fill_cache, boolean()}}.
+                            {fill_cache, boolean()}}.
 
 -type streaming_options() :: [streaming_option()].
 
@@ -156,13 +154,17 @@ init() ->
 -type encoding() :: erlang | msgpack.
 
 -type fold_options() :: [read_option() |
-			 {encoding, encoding()} |
+                         {encoding, encoding()} |
                          {fold_method, fold_method()} |
                          {start_key, binary()} |
                          {end_key, binary() | undefined} |
                          {start_inclusive, boolean()} |
                          {end_inclusive, boolean()} |
                          {limit, pos_integer()} |
+                         {bigsets, boolean()} |
+                         {vnode, binary()} |
+                         {range_start, binary() | undefined} | % start key of range to return (used by Bigsets)
+                         {range_end, binary() | undefined} |   % end key of range to return (used by Bigsets)
                          streaming_option()].
 
 -type iterator_action() :: first | last | next | prev | prefetch | binary().

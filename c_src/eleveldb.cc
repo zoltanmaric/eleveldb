@@ -1198,7 +1198,7 @@ streaming_start(ErlNifEnv * env,
 
         fold(env, options_list, parse_streaming_option, opts);
         opts.checkOptions();
-
+        //leveldb::Log( db_ptr->m_Db->GetLogger(), "streaming_start: has_end_key=%s; end_inclusive=%s", has_end_key ? "true" : "false", opts.end_inclusive ? "true" : "false" );
     } catch(std::runtime_error& err) {
 	ERL_NIF_TERM msg_str  = enif_make_string(env, err.what(), ERL_NIF_LATIN1);
         return enif_make_tuple3(env, eleveldb::ATOM_ERROR, reply_ref, msg_str);

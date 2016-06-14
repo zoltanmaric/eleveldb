@@ -32,9 +32,9 @@ BigsetAccumulator::FinalizeElement()
 //
 // NOTE: throws a std::runtime_error if an error occurs
 bool // true => record processed; false => encountered an element record but have not seen a clock for the specified actor
-BigsetAccumulator::AddRecord( Slice key, Slice value )
+BigsetAccumulator::AddRecord( Slice Key, Slice Value )
 {
-    BigsetKey keyToAdd( key );
+    BigsetKey keyToAdd( Key );
     if ( keyToAdd.IsValid() )
     {
         const Slice& setName( keyToAdd.GetSetName() );
@@ -55,7 +55,7 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
             throw std::runtime_error( "Unexpected set name change" );
         }
 
-        //leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processing key type '%c' for set '%s' with value size %zu", (char)keyToAdd.GetKeyType(), m_CurrentSetName.ToString().c_str(), value.size() );
+        //leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processing key type '%c' for set '%s' with value size %zu", (char)keyToAdd.GetKeyType(), m_CurrentSetName.ToString().c_str(), Value.size() );
 
         if ( keyToAdd.IsClock() )
         {
@@ -73,11 +73,11 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                 m_ActorClockSeen = true;
 
                 //utils::Buffer<100> valueBuff;
-                //if ( valueBuff.Assign( value ) )
+                //if ( valueBuff.Assign( Value ) )
                 //{
                 //    leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: clock key value: '%s'", valueBuff.ToString( utils::Buffer<100>::FormatAsBinaryDecimal ).c_str() );
                 //}
-                leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processed clock key for set '%s' with value size %zu", m_CurrentSetName.ToString().c_str(), value.size() );
+                leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processed clock key for set '%s' with value size %zu", m_CurrentSetName.ToString().c_str(), Value.size() );
             }
         }
         else if ( keyToAdd.IsSetTombstone() )
@@ -94,7 +94,7 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
                 }
 
                 std::string error;
-                if ( !BigsetClock::ValueToBigsetClock( value, m_SetTombstone, error ) )
+                if ( !BigsetClock::ValueToBigsetClock( Value, m_SetTombstone, error ) )
                 {
                     std::string msg( "Error parsing set tombstone value: " );
                     msg += error;
@@ -168,27 +168,51 @@ BigsetAccumulator::AddRecord( Slice key, Slice value )
 }
 
 void
-BigsetAccumulator::GetCurrentElement( Slice& key, Slice& value )
+BigsetAccumulator::GetCurrentElement( Slice& Key, Slice& Value )
 {
     if ( m_ElementReady )
     {
         Slice readyKey( m_ReadyKey.GetCharBuffer(), m_ReadyKey.GetBytesUsed() );
-        key = readyKey;
+        Key = readyKey;
 
         Slice readyValue( m_ReadyValue.GetCharBuffer(), m_ReadyValue.GetBytesUsed() );
-        value = readyValue;
+        Value = readyValue;
 
         m_ElementReady = false; // prepare for the next element
 
-        //leveldb::Log( m_pLogger, "BigsetAccumulator::GetCurrentElement: returning element; key size=%zu, value size=%zu", key.size(), value.size() );
+        //leveldb::Log( m_pLogger, "BigsetAccumulator::GetCurrentElement: returning element; key size=%zu, value size=%zu", Key.size(), Value.size() );
     }
     else if ( m_ActorClockReady )
     {
         // we send the key/value back to the caller as-is
         m_ActorClockReady = false;
 
-        //leveldb::Log( m_pLogger, "BigsetAccumulator::GetCurrentElement: returning clock; key size=%zu, value size=%zu", key.size(), value.size() );
+        //leveldb::Log( m_pLogger, "BigsetAccumulator::GetCurrentElement: returning clock; key size=%zu, value size=%zu", Key.size(), Value.size() );
     }
+}
+
+// returns the final element currently being processed
+//
+// NOTE: throws a std::runtime_error if an error occurs
+bool // true => final element returned, else no element to return
+BigsetAccumulator::GetFinalElement( Slice& Key, Slice& Value )
+{
+    bool recordReady = false;
+
+    // if we have an element being processed, finalize it
+    if ( !m_CurrentElement.IsEmpty() )
+    {
+        // finish processing the final element
+        FinalizeElement();
+
+        // do we have an element to return? (e.g., did it survive tombstone processing?)
+        recordReady = RecordReady();
+        if ( recordReady )
+        {
+            GetCurrentElement( Key, Value );
+        }
+    }
+    return recordReady;
 }
 
 } // namespace bigset

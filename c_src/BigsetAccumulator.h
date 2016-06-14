@@ -46,8 +46,9 @@ public:
     //
     // NOTE: throws a std::runtime_error if an error occurs
     bool // true => record processed; false => encountered an element record but have not seen a clock for the specified actor
-    AddRecord( Slice key, Slice value );
+    AddRecord( Slice Key, Slice Value );
 
+    // returns whether or not the last record added is ready to be sent to the caller
     bool
     RecordReady() const
     {
@@ -60,8 +61,19 @@ public:
         return m_ErlangBinaryFormat;
     }
 
+    // sets the K/V pair we send back to the caller
     void
-    GetCurrentElement( Slice& key, Slice& value );
+    GetCurrentElement( Slice& Key, Slice& Value );
+
+    // returns whether or not we're currently processing an element
+    bool
+    ProcessingElement() const { return !m_CurrentElement.IsEmpty(); }
+
+    // returns the final element currently being processed
+    //
+    // NOTE: throws a std::runtime_error if an error occurs
+    bool // true => final element returned, else no element to return
+    GetFinalElement( Slice& Key, Slice& Value );
 };
 
 } // namespace bigset

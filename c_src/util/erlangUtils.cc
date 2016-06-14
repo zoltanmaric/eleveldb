@@ -103,7 +103,7 @@ FormatBigEndianUint32(
 
 // writes the contents of a buffer to an Erlang binary ETF record type
 bool
-    WriteErlangBinary(
+WriteErlangBinary(
     const void* pBinary,         // IN: binary data to write as an Erlang binary ETF record
     size_t      BinarySize,      // IN: number of bytes in the binary data
     char*       OutputBuffer,    // IN: buffer where the record is written

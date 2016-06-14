@@ -973,7 +973,6 @@ work_result RangeScanTask::operator()()
     enif_get_local_pid(env, caller_pid_term, &pid);
 
     ErlNifBinary bin;
-    const size_t initial_bin_size = size_t(options_.max_batch_bytes * 1.1);
     size_t out_offset = 0;
     size_t end_of_last_record = 0;
     size_t num_read   = 0;
@@ -992,6 +991,9 @@ work_result RangeScanTask::operator()()
 
     while ( !sync_obj_->IsConsumerDead() )
     {
+        leveldb::Slice key, value;
+        std::string errMsg;
+
         //------------------------------------------------------------
         // If reached end (iter invalid) or we've reached the
         // specified limit on number of items (options_.limit), or the
@@ -1006,6 +1008,34 @@ work_result RangeScanTask::operator()()
                  cmp->Compare(iter->key(), ekey_slice) >= 0
                 )))
         {
+            // if we are processing bigset elements, we may have an in-flight
+            // element that we need to add to the output buffer
+            if ( options_.isBigset_ && bigset_acc_->ProcessingElement() )
+            {
+                try
+                {
+                    // we have an element that we've partially processed, so
+                    // finalize it and see if we need to return it
+                    if ( bigset_acc_->GetFinalElement( key, value ) )
+                    {
+                        if ( !WriteRecordToBuffer( key, value, bin, out_offset,
+                                                   end_of_last_record, useErlangBinaryFormat,
+                                                   recordsReturned, numInBatch, errMsg ) )
+                        {
+                            throw std::runtime_error( errMsg );
+                        }
+                    }
+                }
+                catch ( std::runtime_error& ex )
+                {
+                    errMsg = ex.what();
+                    leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                                  "RangeScanTask: error adding final record %llu: %s", recordsConsidered, errMsg.c_str() );
+                    sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, errMsg.c_str() );
+                    return work_result( local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR );
+                }
+            }
+
             // if we have any records to send, do so now
 	        if ( numInBatch > 0 )
             {
@@ -1043,8 +1073,8 @@ work_result RangeScanTask::operator()()
         //------------------------------------------------------------
 
         ++recordsConsidered;
-        leveldb::Slice key   = iter->key();
-        leveldb::Slice value = iter->value();
+        key   = iter->key();
+        value = iter->value();
 
         bool filter_passed = true;
 
@@ -1106,118 +1136,23 @@ work_result RangeScanTask::operator()()
 
         if ( options_.isBigset_ )
         {
-            // we are processing a bigset, so accumulate per-element (we
-            // may have multiple records per element in the set)
-            try
-            {
-                if ( !bigset_acc_->AddRecord( key, value ) )
-                {
-                    // TODO: we didn't find a clock for the specified actor, so return "not found" (or maybe just break out of the loop?)
-                    throw std::runtime_error( "RangeScanTask: BigsetAccumulator::AddRecord() returned false" );
-                }
-            }
-            catch ( std::runtime_error& ex )
+            if ( !ProcessBigsetRecord( key, value, filter_passed, recordsConsidered, errMsg ) )
             {
                 // TODO: ensure this is the correct handling of an error
-                leveldb::Log( m_DbPtr->m_Db->GetLogger(),
-                              "RangeScanTask: error adding record %llu: %s", recordsConsidered, ex.what() );
-                sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, ex.what() );
+                sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, errMsg.c_str() );
                 return work_result( local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR );
-            }
-
-            filter_passed = bigset_acc_->RecordReady();
-            if ( filter_passed )
-            {
-                // we have finished accumulating the current element,
-                // so add it to the output buffer
-                bigset_acc_->GetCurrentElement( key, value );
             }
         }
         
         if ( filter_passed )
         {
-            // allocate the output buffer if this is the first KV pair in this batch
-            if ( out_offset == 0 )
+            if ( !WriteRecordToBuffer( key, value, bin, out_offset,
+                                       end_of_last_record, useErlangBinaryFormat,
+                                       recordsReturned, numInBatch, errMsg ) )
             {
-                enif_alloc_binary( initial_bin_size, &bin );
-                if ( useErlangBinaryFormat )
-                {
-                    // we write this KV pair to the output buffer in the Erlang
-                    // External Term Format specified at http://erlang.org/doc/apps/erts/erl_ext_dist.html;
-                    // specifically, we write it as a list of 1 or more 2-tuples of the form:
-                    //
-                    //      [{Key :: binary, Value :: binary}]
-
-                    // first we add the External Term Format magic number
-                    bin.data[0] = (unsigned char)131;
-
-                    // we are writing an Erlang list, which has the External Term Format
-                    //
-                    //      |1  |4     |        |    |
-                    //      |108|Length|Elements|Tail|
-                    bin.data[1] = (unsigned char)108;
-
-                    // leave room for the 4-byte length that we write once we know
-                    // the total number of 2-tuples
-                    out_offset = 6;
-                }
+                sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, errMsg.c_str() );
+                return work_result( local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR );
             }
-
-            ++recordsReturned;
-            ++numInBatch;
-
-            const size_t ksz = key.size();
-            const size_t vsz = value.size();
-
-            // the number of bytes stored before a K/V entry depends on the encoding;
-            // for Erlang binary format, we store the ID byte 109 followed by the
-            // count of binary bytes as a 4-byte big-endian number; for the old-style
-            // encoding, we use a variable-length encoding of the size
-            const size_t ksz_sz = useErlangBinaryFormat ? 5 : VarintLength(ksz);
-            const size_t vsz_sz = useErlangBinaryFormat ? 5 : VarintLength(vsz);
-
-            // the total count of bytes we're writing to the output buffer is
-            // the size of the K/V binary blobs plus the blobs themselves; if
-            // we're writing the Erlang binary format, then we also need to
-            // add 2 bytes to indicate this is a 2-tuple
-            const size_t header_sz = (useErlangBinaryFormat ? 2 : 0);
-            const size_t esz = header_sz + ksz + ksz_sz + vsz + vsz_sz;
-            const size_t next_offset = out_offset + esz;
-
-            //------------------------------------------------------------
-            // If we need more space, allocate it exactly since that means we
-            // reached the batch max anyway and will send it right away
-            //------------------------------------------------------------
-
-            // if we're writing the Erlang binary format, then we need to leave
-            // room for one last term, namely the empty list at the tail of the KV list
-            end_of_last_record = next_offset + (useErlangBinaryFormat ? 1 : 0);
-            if ( end_of_last_record > bin.size )
-            {
-                enif_realloc_binary( &bin, end_of_last_record );
-            }
-
-            char * const out = (char*)bin.data + out_offset;
-
-            if ( useErlangBinaryFormat )
-            {
-                // write the tuple record ID byte (104) followed by the tuple's arity (2)
-                out[0] = (char)104;
-                out[1] = (char)2;
-
-                basho::utils::WriteErlangBinary( key.data(), ksz, out + header_sz, ksz_sz + ksz );
-                basho::utils::WriteErlangBinary( value.data(), vsz, out + header_sz + ksz_sz + ksz, vsz_sz + vsz );
-            }
-            else
-            {
-                EncodeVarint64( out, ksz );
-                memcpy( out + ksz_sz, key.data(), ksz );
-
-                EncodeVarint64( out + ksz_sz + ksz, vsz );
-                memcpy( out + ksz_sz + ksz + vsz_sz, value.data(), vsz );
-            }
-
-            out_offset = next_offset;
 
             //------------------------------------------------------------
             // If we've reached the maximum number of bytes to include in
@@ -1233,11 +1168,12 @@ work_result RangeScanTask::operator()()
 
                 // if we're writing the Erlang binary format, insert the count
                 // of tuples we added to the buffer (we left room for the count
-                // above), and add an empty list as the tail of the KV list
+                // when we allocated the buffer in the WriteRecordToBuffer()
+                // method), and add an empty list as the tail of the KV list
                 if ( useErlangBinaryFormat )
                 {
                     basho::utils::FormatBigEndianUint32( numInBatch, (char*)bin.data + 2, 4 );
-                    bin.data[ next_offset ] = (unsigned char)106; // empty list record ID
+                    bin.data[ out_offset ] = (unsigned char)106; // empty list record ID
                 }
 
                 bytesReturned += bin.size;
@@ -1245,7 +1181,7 @@ work_result RangeScanTask::operator()()
 
                 // Maybe block if max reached.
 
-                sync_obj_->AddBytes( out_offset );
+                sync_obj_->AddBytes( end_of_last_record );
 
                 out_offset = 0;
                 numInBatch = 0;
@@ -1292,6 +1228,165 @@ work_result RangeScanTask::operator()()
     return work_result();
 
 }   // RangeScanTask::operator()
+
+// processes a K/V record from leveldb, accumulating values until we have a record that is ready to return to the caller
+bool // true => successfully processed the bigset record, else not
+RangeScanTask::ProcessBigsetRecord(
+    Slice&         Key,               // IN/OUT: (IN) key of the record from leveldb; (OUT) the key to write to the output buffer
+    Slice&         Value,             // IN/OUT: (IN) value of the record from leveldb; (OUT) the value to write to the output buffer
+    bool&          RecordReady,       // OUT: receives whether or not we have a record ready to write to the output buffer
+    const uint64_t RecordsConsidered, // IN: number of records processed so far; used in error reporting
+    std::string&   ErrMsg )           // OUT: if an error occurs (false returned), receives a descriptive message
+{
+    bool success = true;
+
+    // we are processing a bigset, so accumulate per-element (we
+    // may have multiple records per element in the set)
+    try
+    {
+        if ( !bigset_acc_->AddRecord( Key, Value ) ) // NOTE: BigsetAccumulator::AddRecord() may throw std::runtime_error
+        {
+            throw std::runtime_error( "BigsetAccumulator::AddRecord() returned false" );
+        }
+    }
+    catch ( std::runtime_error& ex )
+    {
+        ErrMsg = ex.what();
+        leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                      "RangeScanTask: error adding record %llu: %s", RecordsConsidered, ErrMsg.c_str() );
+        success = false;
+    }
+
+    if ( success )
+    {
+        RecordReady = bigset_acc_->RecordReady();
+        if ( RecordReady )
+        {
+            // we have finished accumulating the current element,
+            // so add it to the output buffer
+            bigset_acc_->GetCurrentElement( Key, Value );
+        }
+    }
+    return success;
+}
+
+bool // true => successfully added K/V pair to the output buffer, else not
+RangeScanTask::WriteRecordToBuffer(
+    const Slice&  Key,               // IN: the key to write to the output buffer
+    const Slice&  Value,             // IN: the value to write to the output buffer
+    ErlNifBinary& Buffer,            // IN/OUT: the Erlang binary object buffer; will be re-allocated if necessary
+    size_t&       OutputOffset,      // IN/OUT: (IN) offset in output buffer where next record should be written; (OUT) updated offset for next record
+    size_t&       EndOfLastRecord,   // OUT: set to end of output buffer; if writing Erlang binary format, allows room for empty list added at tail of KV list
+    bool          UseErlangBinaryFormat, // IN: true => write KV pair as Erlang 2-tuple, else as length-prefixed binaries
+    uint64_t&     RecordsReturned,   // IN/OUT: counter that is updated to indicate the total number of records we've returned to the client
+    uint32_t&     NumInBatch,        // IN/OUT: counter that is updated to indicate the number of records in the output buffer
+    std::string&  ErrMsg )           // OUT: if an error occurs (false returned), receives a descriptive message
+{
+    // allocate the output buffer if this is the first KV pair in this batch
+    if ( OutputOffset == 0 )
+    {
+        const size_t initial_bin_size = size_t(options_.max_batch_bytes * 1.1);
+
+        if ( 0 == enif_alloc_binary( initial_bin_size, &Buffer ) )
+        {
+            ErrMsg = "buffer allocation failed";
+            return false;
+        }
+
+        if ( UseErlangBinaryFormat )
+        {
+            // we write this KV pair to the output buffer in the Erlang
+            // External Term Format specified at http://erlang.org/doc/apps/erts/erl_ext_dist.html;
+            // specifically, we write it as a list of 1 or more 2-tuples of the form:
+            //
+            //      [{Key :: binary, Value :: binary}]
+
+            // first we add the External Term Format magic number
+            Buffer.data[0] = (unsigned char)131;
+
+            // we are writing an Erlang list, which has the External Term Format
+            //
+            //      |1  |4     |        |    |
+            //      |108|Length|Elements|Tail|
+            Buffer.data[1] = (unsigned char)108;
+
+            // leave room for the 4-byte length that we write once we know
+            // the total number of 2-tuples
+            OutputOffset = 6;
+        }
+    }
+
+    ++RecordsReturned;
+    ++NumInBatch;
+
+    const size_t ksz = Key.size();
+    const size_t vsz = Value.size();
+
+    // the number of bytes stored before a K/V entry depends on the encoding;
+    // for Erlang binary format, we store the ID byte 109 followed by the
+    // count of binary bytes as a 4-byte big-endian number; for the old-style
+    // encoding, we use a variable-length encoding of the size
+    const size_t ksz_sz = UseErlangBinaryFormat ? 5 : VarintLength(ksz);
+    const size_t vsz_sz = UseErlangBinaryFormat ? 5 : VarintLength(vsz);
+
+    // the total count of bytes we're writing to the output buffer is
+    // the size of the K/V binary blobs plus the blobs themselves; if
+    // we're writing the Erlang binary format, then we also need to
+    // add 2 bytes to indicate this is a 2-tuple
+    const size_t header_sz = (UseErlangBinaryFormat ? 2 : 0);
+    const size_t esz = header_sz + ksz + ksz_sz + vsz + vsz_sz;
+    const size_t next_offset = OutputOffset + esz;
+
+    //------------------------------------------------------------
+    // If we need more space, allocate it exactly since that means we
+    // reached the batch max anyway and will send it right away
+    //------------------------------------------------------------
+
+    // if we're writing the Erlang binary format, then we need to leave
+    // room for one last term, namely the empty list at the tail of the KV list
+    EndOfLastRecord = next_offset + (UseErlangBinaryFormat ? 1 : 0);
+    if ( EndOfLastRecord > Buffer.size )
+    {
+        if ( 0 == enif_realloc_binary( &Buffer, EndOfLastRecord ) )
+        {
+            ErrMsg = "buffer reallocation failed";
+            return false;
+        }
+    }
+
+    char * const out = (char*)Buffer.data + OutputOffset;
+
+    if ( UseErlangBinaryFormat )
+    {
+        // write the tuple record ID byte (104) followed by the tuple's arity (2)
+        out[0] = (char)104;
+        out[1] = (char)2;
+
+        if ( !basho::utils::WriteErlangBinary( Key.data(), ksz, out + header_sz, ksz_sz + ksz ) )
+        {
+            ErrMsg = "error writing key to buffer in Erlang binary format";
+            return false;
+        }
+
+        if ( !basho::utils::WriteErlangBinary( Value.data(), vsz, out + header_sz + ksz_sz + ksz, vsz_sz + vsz ) )
+        {
+            ErrMsg = "error writing value to buffer in Erlang binary format";
+            return false;
+        }
+    }
+    else
+    {
+        EncodeVarint64( out, ksz );
+        memcpy( out + ksz_sz, Key.data(), ksz );
+
+        EncodeVarint64( out + ksz_sz + ksz, vsz );
+        memcpy( out + ksz_sz + ksz + vsz_sz, Value.data(), vsz );
+    }
+
+    OutputOffset = next_offset;
+    return true;
+}
+
 
 ErlNifResourceType * RangeScanTask::sync_handle_resource_ = NULL;
 

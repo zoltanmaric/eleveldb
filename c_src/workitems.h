@@ -483,6 +483,27 @@ private:
     int VarintLength(uint64_t v);
     char* EncodeVarint64(char* dst, uint64_t v);
 
+    // processes a K/V record from leveldb, accumulating values until we have a record that is ready to return to the caller
+    bool // true => successfully processed the bigset record, else not
+    ProcessBigsetRecord(
+        Slice&         Key,               // IN/OUT: (IN) key of the record from leveldb; (OUT) the key to write to the output buffer
+        Slice&         Value,             // IN/OUT: (IN) value of the record from leveldb; (OUT) the value to write to the output buffer
+        bool&          RecordReady,       // OUT: receives whether or not we have a record ready to write to the output buffer
+        const uint64_t RecordsConsidered, // IN: number of records processed so far; used in error reporting
+        std::string&   ErrMsg );          // OUT: if an error occurs (false returned), receives a descriptive message
+
+    bool // true => successfully added K/V pair to the output buffer, else not
+    WriteRecordToBuffer(
+        const Slice&  Key,               // IN: the key to write to the output buffer
+        const Slice&  Value,             // IN: the value to write to the output buffer
+        ErlNifBinary& Buffer,            // IN/OUT: the Erlang binary object buffer; will be re-allocated if necessary
+        size_t&       OutputOffset,      // IN/OUT: (IN) offset in output buffer where next record should be written; (OUT) updated offset for next record
+        size_t&       EndOfLastRecord,   // OUT: set to end of output buffer; if writing Erlang binary format, allows room for empty list added at tail of KV list
+        bool          UseErlangBinaryFormat, // IN: true => write KV pair as Erlang 2-tuple, else as length-prefixed binaries
+        uint64_t&     RecordsReturned,   // IN/OUT: counter that is updated to indicate the total number of records we've returned to the client
+        uint32_t&     NumInBatch,        // IN/OUT: counter that is updated to indicate the number of records in the output buffer
+        std::string&  ErrMsg );          // OUT: if an error occurs (false returned), receives a descriptive message
+
 protected:
     RangeScanOptions options_;
     std::string start_key_;
