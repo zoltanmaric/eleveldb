@@ -124,7 +124,8 @@ init() ->
                          {delete_threshold, pos_integer()} |
                          {tiered_slow_level, pos_integer()} |
                          {tiered_fast_prefix, string()} |
-                         {tiered_slow_prefix, string()}].
+                         {tiered_slow_prefix, string()} |
+                         {bigsets, boolean()}].
 
 -type read_option() :: {verify_checksums, boolean()} |
                        {fill_cache, boolean()}.
@@ -163,8 +164,7 @@ init() ->
                          {limit, pos_integer()} |
                          {bigsets, boolean()} |
                          {vnode, binary()} |
-                         {range_start, binary() | undefined} | % start key of range to return (used by Bigsets)
-                         {range_end, binary() | undefined} |   % end key of range to return (used by Bigsets)
+                         {bigset_start_key, binary()} | % used to specify the start of the bigset if start_key begins a range
                          streaming_option()].
 
 -type iterator_action() :: first | last | next | prev | prefetch | binary().

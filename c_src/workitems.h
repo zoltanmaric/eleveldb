@@ -375,6 +375,7 @@ struct RangeScanOptions {
 
     // Record type options
 
+    std::string bigsetStartKey_; // used to specify the start of the bigset if start_key begins a range
     basho::bigset::Actor bigsetActor_;
     bool isBigset_;
     bool isBigsetActorSet_;

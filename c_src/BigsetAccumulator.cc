@@ -102,6 +102,7 @@ BigsetAccumulator::AddRecord( Slice Key, Slice Value )
                 }
 
                 m_ActorSetTombstoneSeen = true;
+                m_FinishedReadingMetadata = true; // once we've read the set tombstone for this actor, we've gathered all available metadata for this bigset
                 leveldb::Log( m_pLogger,
                               "BigsetAccumulator::AddRecord: processed set tombstone key; version vector count=%zu, dot cloud count=%zu ",
                               m_SetTombstone.GetVersionVectorCount(), m_SetTombstone.GetDotCloudCount() );
@@ -117,6 +118,9 @@ BigsetAccumulator::AddRecord( Slice Key, Slice Value )
                 leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord(WARN): actor clock not seen before element record" );
                 return false;
             }
+
+            // once we start reading elements, we've read all available metadata for this bigset
+            m_FinishedReadingMetadata = true;
 
             // we have an element key; see if it's for the current element we're processing
             const Slice& element( keyToAdd.GetElement() );
@@ -149,6 +153,7 @@ BigsetAccumulator::AddRecord( Slice Key, Slice Value )
         {
             // this is an end key, so we're done enumerating the elements in this
             // bigset, and we need to finish processing the previous element
+            m_FinishedReadingMetadata = true;
             FinalizeElement();
             leveldb::Log( m_pLogger, "BigsetAccumulator::AddRecord: processed end key" );
         }
@@ -165,6 +170,15 @@ BigsetAccumulator::AddRecord( Slice Key, Slice Value )
         throw std::runtime_error( "Unable to parse key" );
     }
     return true;
+}
+
+// clears any data accumulated for the current record
+void
+BigsetAccumulator::Clear()
+{
+    m_CurrentElement.ResetBuffer();
+    m_CurrentDots.Clear();
+    m_ElementReady = false;
 }
 
 void

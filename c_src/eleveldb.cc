@@ -160,6 +160,7 @@ ERL_NIF_TERM ATOM_ERLANG_ENCODING;
 ERL_NIF_TERM ATOM_MSGPACK_ENCODING;
 ERL_NIF_TERM ATOM_BIGSETS;
 ERL_NIF_TERM ATOM_VNODE;
+ERL_NIF_TERM ATOM_BIGSET_START_KEY;
 }   // namespace eleveldb
 
 using std::nothrow;
@@ -587,6 +588,14 @@ ERL_NIF_TERM parse_streaming_option(ErlNifEnv* env, ERL_NIF_TERM item,
                 // TODO: log an error message
                 return eleveldb::ATOM_BADARG;
             }
+        } else if (option[0] == eleveldb::ATOM_BIGSET_START_KEY) {
+            ErlNifBinary bigsetStartKey;
+            if (!enif_inspect_binary(env, option[1], &bigsetStartKey)) {
+                // TODO: log an error message
+                return eleveldb::ATOM_BADARG;
+            }
+
+            opts.bigsetStartKey_.assign((const char*)bigsetStartKey.data, bigsetStartKey.size);
         }
     }
 
@@ -1518,6 +1527,7 @@ try
     ATOM(eleveldb::ATOM_MSGPACK_ENCODING, Encoding::encodingAtom(Encoding::MSGPACK).c_str());
     ATOM(eleveldb::ATOM_BIGSETS, "bigsets");
     ATOM(eleveldb::ATOM_VNODE, "vnode");
+    ATOM(eleveldb::ATOM_BIGSET_START_KEY, "bigset_start_key");
 #undef ATOM
 
 

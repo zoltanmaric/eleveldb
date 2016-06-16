@@ -947,9 +947,11 @@ work_result RangeScanTask::operator()()
     uint64_t recordsConsidered = 0, recordsReturned = 0, bytesReturned = 0;
 
     bool useErlangBinaryFormat = false;
+    bool haveBigsetStartKey = false;
     if ( options_.isBigset_ )
     {
         useErlangBinaryFormat = bigset_acc_->UseErlangBinaryFormat();
+        haveBigsetStartKey = !options_.bigsetStartKey_.empty();
     }
 
     ErlNifEnv* env     = local_env_;
@@ -967,7 +969,18 @@ work_result RangeScanTask::operator()()
     const leveldb::Slice skey_slice(start_key_);
     const leveldb::Slice ekey_slice(end_key_);
 
-    iter->Seek(skey_slice);
+    // seek to the starting point of this scan
+    if ( haveBigsetStartKey )
+    {
+        // we are doing a range query on a bigset, so we start at the beginning
+        // of the bigset to get the clock and tombstone keys
+        const leveldb::Slice bigsetStartKeySlice( options_.bigsetStartKey_ );
+        iter->Seek( bigsetStartKeySlice );
+    }
+    else
+    {
+        iter->Seek(skey_slice);
+    }
 
     ErlNifPid pid;
     enif_get_local_pid(env, caller_pid_term, &pid);
@@ -983,6 +996,7 @@ work_result RangeScanTask::operator()()
     //------------------------------------------------------------
 
     if (!options_.start_inclusive
+        && !haveBigsetStartKey // don't skip the first key if we're doing a bigset range query; we need the bigset clock
         && iter->Valid()
         && cmp->Compare(iter->key(), skey_slice) == 0)
     {
@@ -1142,6 +1156,37 @@ work_result RangeScanTask::operator()()
                 sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, errMsg.c_str() );
                 return work_result( local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR );
             }
+
+            // if we're doing a bigset range query and we've just finished getting
+            // the bigset clock and set tombstone for this node, then skip to the
+            // start of the range
+            if ( haveBigsetStartKey && bigset_acc_->FinishedReadingMetadata() )
+            {
+                // clear the haveBigsetStartKey flag so that we only do this once
+                haveBigsetStartKey = false;
+
+                // if the range query start key matches the current key, then
+                // we don't need to do anything, else we need to clear the
+                // accumulator and seek to the first record in this range query
+                int cmpCurrentKeyToStartKey = cmp->Compare( key, skey_slice );
+                if ( cmpCurrentKeyToStartKey != 0 )
+                {
+                    // the current key is not the specified start key, so do a seek
+                    iter->Seek( skey_slice );
+                    bigset_acc_->Clear();
+                    filter_passed = false;
+                }
+
+                // if we're not including the start key in the results, skip it
+                if ( !options_.start_inclusive
+                     && iter->Valid()
+                     && cmp->Compare( iter->key(), skey_slice ) == 0 )
+                {
+                    iter->Next();
+                    bigset_acc_->Clear();
+                    filter_passed = false;
+                }
+            }
         }
         
         if ( filter_passed )
@@ -1222,7 +1267,7 @@ work_result RangeScanTask::operator()()
                       "RangeScanTask: streaming fold took %s microsecs; records considered=%s, returned=%s; size returned=%s; format=%s",
                       elapsedMicrosStr.c_str(), recordsConsideredStr.c_str(),
                       recordsReturnedStr.c_str(), bytesReturnedStr.c_str(),
-                      useErlangBinaryFormat ? "Erlang" : "standard");
+                      useErlangBinaryFormat ? "Erlang binary" : "standard" );
     }
 
     return work_result();
