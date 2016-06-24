@@ -1,4 +1,5 @@
 #include "CmpUtil.h"
+#include "ErlUtil.h"
 #include "StringBuf.h"
 
 #include "exceptionutils.h"
@@ -226,6 +227,130 @@ CmpUtil::parseMap(const char* data, size_t size)
     }
 
     return keyValMap;
+}
+
+/**.......................................................................
+ * Parse a map encoded as a msgpack object into component keys and
+ * datatypes
+ */
+ERL_NIF_TERM
+CmpUtil::buildErlTermFromMap(const char* data, size_t size, ErlNifEnv* env)
+{
+    cmp_mem_access_t ma;
+    cmp_object_t     map;
+    uint32_t         map_size;
+    cmp_ctx_t        cmp;
+
+    std::map<std::string, DataType::Type> keyValMap;
+    
+    cmp_mem_access_ro_init(&cmp, &ma, data, size);
+
+    if(!cmp_read_object(&cmp, &map))
+      ThrowRuntimeError("Error reading msgpack map");
+
+    if(!cmp_object_as_map(&map, &map_size))
+      ThrowRuntimeError("Unable to parse data as a msgpack map");
+
+    //------------------------------------------------------------
+    // Iterate over the map, inspecting field names
+    //------------------------------------------------------------
+
+    ERL_NIF_TERM tuples[map_size];
+    
+    StringBuf sBuf;
+    for(unsigned int iField=0; iField < map_size; iField++) {
+
+        //------------------------------------------------------------
+        // First read the field key
+        //------------------------------------------------------------
+
+        cmp_object_t key_obj;
+
+        if(!cmp_read_object(&cmp, &key_obj) || !cmp_object_is_str(&key_obj))
+	  ThrowRuntimeError("Failed to read key");
+
+	uint32_t len=0;
+	if(!cmp_object_as_str(&key_obj, &len))
+	  ThrowRuntimeError("Error parsing object as a string");
+
+        sBuf.resize(len+1);
+        if(!cmp_object_to_str(&cmp, &key_obj, sBuf.getBuf(), len+1))
+	  ThrowRuntimeError("Error reading key string");
+
+        std::string key(sBuf.getBuf());
+
+	//------------------------------------------------------------
+	// Next read the field value
+	//------------------------------------------------------------
+
+        cmp_object_t obj;
+
+        if(!cmp_read_object(&cmp, &obj))
+            ThrowRuntimeError("Unable to read value for field " << key);
+
+        DataType::Type type = typeOf(&obj);
+
+        switch (type) {
+        case DataType::UINT8:
+        case DataType::UINT16:
+        case DataType::UINT32:
+        case DataType::UINT64:
+            tuples[iField] = enif_make_tuple2(env,
+                                              makeErlBinary(env, sBuf.getBuf(), len),
+                                              enif_make_uint64(env, (ErlNifUInt64)objectToUint64(&obj)));
+            break;
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            tuples[iField] = enif_make_tuple2(env,
+                                              makeErlBinary(env, sBuf.getBuf(), len),
+                                              enif_make_uint64(env, (ErlNifSInt64)objectToInt64(&obj)));
+            break;
+        case DataType::BOOL:
+            tuples[iField] = enif_make_tuple2(env,
+                                              makeErlBinary(env, sBuf.getBuf(), len),
+                                              enif_make_atom(env, objectToUint8(&obj) ? "true" : "false"));
+            break;
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            tuples[iField] = enif_make_tuple2(env,
+                                              makeErlBinary(env, sBuf.getBuf(), len),
+                                              enif_make_double(env, objectToDouble(&obj)));
+            break;
+        case DataType::STRING:
+        case DataType::BIN:
+        {
+            size_t size=0;
+            unsigned char* ptr = getDataPtr(&ma, &cmp, &obj, size, false);
+            tuples[iField] = enif_make_tuple2(env,
+                                              makeErlBinary(env, sBuf.getBuf(), len),
+                                              makeErlBinary(env, ptr, size));
+        }
+        break;
+        default:
+            break;
+        }
+
+//        skipLastReadObject(&ma, &cmp, &obj);
+    }
+
+    ERL_NIF_TERM ret = enif_make_list_from_array(env, tuples, map_size);
+    return ret;
+}
+
+ERL_NIF_TERM CmpUtil::makeErlBinary(ErlNifEnv* env, char* ptr, size_t size)
+{
+    return makeErlBinary(env, (unsigned char*)ptr, size);
+}
+
+ERL_NIF_TERM CmpUtil::makeErlBinary(ErlNifEnv* env, unsigned char* ptr, size_t size)
+{
+    ErlNifBinary bin;
+    enif_alloc_binary(size, &bin);
+    for(unsigned i=0; i < size; i++)
+        bin.data[i] = ptr[i];
+    return enif_make_binary(env, &bin);
 }
 
 /**.......................................................................

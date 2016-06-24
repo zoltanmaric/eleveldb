@@ -17,6 +17,8 @@
 #include <map>
 #include <vector>
 
+#include "erl_nif.h"
+
 #include "cmp.h"
 #include "cmp_mem_access.h"
 
@@ -110,6 +112,10 @@ namespace eleveldb {
         static std::map<uint8_t, CONV_INT64_FN(*)>  int64ConvMap_;
         static std::map<uint8_t, CONV_UINT64_FN(*)> uint64ConvMap_;
         static std::map<uint8_t, CONV_DOUBLE_FN(*)> doubleConvMap_;
+
+        static ERL_NIF_TERM buildErlTermFromMap(const char* data, size_t size, ErlNifEnv* env);
+        static ERL_NIF_TERM makeErlBinary(ErlNifEnv* env, unsigned char* ptr, size_t size);
+        static ERL_NIF_TERM makeErlBinary(ErlNifEnv* env, char* ptr, size_t size);
 
     }; // End class CmpUtil
     

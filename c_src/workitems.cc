@@ -632,12 +632,13 @@ void RangeScanOptions::checkOptions()
     if(useRangeFilter_) {
         switch (encodingType_) {
         case Encoding::MSGPACK:
+        case Encoding::ERLANG:
             break;
         case Encoding::NONE:
             ThrowRuntimeError("No object encoding was specified");
             break;
         case Encoding::UNKNOWN:
-            ThrowRuntimeError("An invalud object encoding was specified");
+            ThrowRuntimeError("An invalid object encoding was specified");
             break;
         default:
             ThrowRuntimeError("An unsupported object encoding was specified: " << encodingType_);
@@ -775,6 +776,8 @@ RangeScanTask::RangeScanTask(ErlNifEnv * caller_env,
     if(options_.useRangeFilter_) {
         if(options_.encodingType_ == Encoding::MSGPACK)
             extractor_ = new ExtractorMsgpack();
+        else if(options_.encodingType_ == Encoding::ERLANG)
+            extractor_ = new ExtractorErlang();
         else {
             ThrowRuntimeError("An invalid object encoding was specified");
         }

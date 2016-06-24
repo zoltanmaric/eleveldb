@@ -36,6 +36,7 @@
 #include "filter_parser.h"
 
 #include "CmpUtil.h"
+#include "EiUtil.h"
 #include "ErlUtil.h"
 
 #include "leveldb/db.h"
@@ -82,6 +83,8 @@ static ErlNifFunc nif_funcs[] =
     {"streaming_stop", 1, eleveldb::streaming_stop},
 
     {"current_usec",   0, eleveldb::currentMicroSeconds},
+    {"decode_msgpack", 1, eleveldb::decode_msgpack},
+    {"decode_ei", 1, eleveldb::decode_ei},
 };
 
 
@@ -1189,6 +1192,49 @@ streaming_stop(ErlNifEnv * env,
     return eleveldb::ATOM_OK;
 }
 
+/**.......................................................................
+ * Decode a TTB-encoded object
+ */
+ERL_NIF_TERM
+decode_ei(ErlNifEnv * env,
+               int argc,
+               const ERL_NIF_TERM argv[])
+{
+    const ERL_NIF_TERM term = argv[0];
+
+    ErlNifBinary bin;
+
+    if(enif_inspect_binary(env, term, &bin) == 0)
+        ThrowRuntimeError("Failed to inspect '" << ErlUtil::formatTerm(env, term)
+                          << "' as a binary");
+
+    COUT("Got term = " << ErlUtil::formatTerm(env, term));
+    
+    int index=1;
+    COUT("Term = " << EiUtil::formatTerm((char*)bin.data, &index));
+    
+    return eleveldb::ATOM_OK;
+}
+
+/**.......................................................................
+ * Decode a msgpack-encoded object
+ */
+ERL_NIF_TERM
+decode_msgpack(ErlNifEnv * env,
+               int argc,
+               const ERL_NIF_TERM argv[])
+{
+    const ERL_NIF_TERM term = argv[0];
+
+    ErlNifBinary bin;
+
+    if(enif_inspect_binary(env, term, &bin) == 0)
+        ThrowRuntimeError("Failed to inspect '" << ErlUtil::formatTerm(env, term)
+                          << "' as a binary");
+
+    return enif_make_tuple2(env, eleveldb::ATOM_OK, CmpUtil::buildErlTermFromMap((char*)bin.data, bin.size, env));
+}
+    
 /**.......................................................................
  * Start streaming
  */

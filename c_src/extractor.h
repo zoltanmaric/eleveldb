@@ -46,10 +46,11 @@ public:
     eleveldb::DataType::Type cTypeOf(std::string field);
     
     virtual void parseTypes(const char *data, size_t size) = 0;
-    virtual void parseRiakObjectTypes(const char *data, size_t size) = 0;
     virtual void extract(const char *data, size_t size, ExpressionNode<bool>* root) = 0;
-    virtual void extractRiakObject(const char *data, size_t size, ExpressionNode<bool>* root) = 0;
-    
+
+    void extractRiakObject(const char *data, size_t size, ExpressionNode<bool>* root);
+    void parseRiakObjectTypes(const char *data, size_t size);
+
     bool riakObjectContentsCanBeParsed(const char* data, size_t size);
     void getToRiakObjectContents(const char* data, size_t size, 
                                  const char** contentsPtr, size_t& contentsSize);
@@ -79,15 +80,31 @@ public:
     ~ExtractorMsgpack();
     
     void parseTypes(const char *data, size_t size);
-    void parseRiakObjectTypes(const char *data, size_t size);
     void extract(const char *data, size_t size, ExpressionNode<bool>* root);
-    void extractRiakObject(const char *data, size_t size, ExpressionNode<bool>* root);
 
     void setBinaryVal(ExpressionNode<bool>* root, std::string& key,
                       cmp_mem_access_t* ma, cmp_ctx_t* cmp, cmp_object_t* obj, bool includeMarker);
 
     void setStringVal(ExpressionNode<bool>* root, std::string& key, 
                       cmp_object_t* obj);
+};
+
+//=======================================================================
+// A class for extracting data encoded in term_to_binary format
+//=======================================================================
+
+class ExtractorErlang : public Extractor {
+public:
+
+    ExtractorErlang();
+    ~ExtractorErlang();
+    
+    void parseTypes(const char *data, size_t size);
+    void setBinaryVal(ExpressionNode<bool>* root, std::string& key, 
+                      char* buf, int* index, bool includeMarker);
+    std::map<std::string, eleveldb::DataType::Type> 
+        parseMap(const char *data, size_t size);
+    void extract(const char* data, size_t size, ExpressionNode<bool>* root);
 };
 
 #endif
