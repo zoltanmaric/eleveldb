@@ -45,7 +45,8 @@
          encode/2,
          current_usec/0,
          decode_msgpack/1,
-         decode_ei/1]).
+         decode_ei/1,
+	 print_version/0]).
 
 %% for testing
 -export([
@@ -342,6 +343,9 @@ do_streaming_fold_test1(StreamRef = {MsgRef, AckRef}, Fun, Acc) ->
             do_streaming_fold(StreamRef, Fun, Acc)
     end.
 
+print_version() ->
+    {"perf/msgpack_test"}.
+    
 current_usec() ->
     erlang:nif_error({error, not_loaded}).
 
