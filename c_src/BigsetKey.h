@@ -51,6 +51,16 @@ public:
     uint64_t GetCounter() const { return m_Counter; }
 };
 
+// key decoding helper routines (taken from leveldb/util/comparator.cc)
+// used in BigsetKey and elsewhere (e.g., BigsetComparator)
+namespace internal {
+
+Slice Get32PrefData( Slice& s );
+uint64_t GetCounter( Slice& s );
+Slice GetKeyType( Slice& s );
+
+} // namespace internal
+
 } // namespace bigset
 } // namespace basho
 

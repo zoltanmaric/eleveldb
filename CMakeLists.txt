@@ -30,6 +30,7 @@ set(ELEVELDB_SRCS
         c_src/atoms.h
         c_src/BigsetAccumulator.cc
         c_src/BigsetClock.cc
+        c_src/BigsetComparator.cc
         c_src/BigsetKey.cc
         c_src/cmp.cc
         c_src/CmpUtil.cc

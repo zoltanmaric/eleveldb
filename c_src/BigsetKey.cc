@@ -100,7 +100,7 @@ namespace bigset {
 namespace internal {
 
 // key decoding helpers taken from leveldb/util/comparator.cc
-static Slice Get32PrefData( Slice& s )
+Slice Get32PrefData( Slice& s )
 {
     uint32_t actual = DecodeFixed32( s.data() );
     Slice    res    = Slice( s.data() + 4, actual );
@@ -108,14 +108,14 @@ static Slice Get32PrefData( Slice& s )
     return res;
 }
 
-static uint64_t GetCounter( Slice& s )
+uint64_t GetCounter( Slice& s )
 {
     uint64_t actual = DecodeFixed64( s.data() );
     s.remove_prefix( 8 );
     return actual;
 }
 
-static Slice GetKeyType( Slice& s )
+Slice GetKeyType( Slice& s )
 {
     Slice res = Slice( s.data(), 1 ); // one byte c, e, or z
     s.remove_prefix( 1 );

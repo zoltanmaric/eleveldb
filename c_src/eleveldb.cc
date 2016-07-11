@@ -44,7 +44,7 @@
 #include "leveldb/cache.h"
 #include "leveldb/filter_policy.h"
 #include "leveldb/perf_count.h"
-#include "leveldb/comparator.h"
+#include "BigsetComparator.h"
 
 #ifndef INCL_THREADING_H
     #include "threading.h"
@@ -495,7 +495,7 @@ ERL_NIF_TERM parse_open_option(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::Optio
         {
             if (option[1] == eleveldb::ATOM_TRUE)
             {
-                opts.comparator = leveldb::GetBSComparator();
+                opts.comparator = basho::bigset::BigsetComparator::GetComparator();
             }
         }
     }

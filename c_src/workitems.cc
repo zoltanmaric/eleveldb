@@ -31,6 +31,7 @@
 #include "filter_parser.h"
 
 #include "ErlUtil.h"
+#include "BigsetComparator.h"
 
 //#include <syslog.h>
 
@@ -1165,10 +1166,14 @@ work_result RangeScanTask::operator()()
                 // clear the haveBigsetStartKey flag so that we only do this once
                 haveBigsetStartKey = false;
 
+                // since we are doing bigset stuff, we know we are using the BigsetComparator
+                const basho::bigset::BigsetComparator* bigsetComparator =
+                                                         reinterpret_cast<const basho::bigset::BigsetComparator*>( cmp );
+
                 // if the range query start key matches the current key, then
                 // we don't need to do anything, else we need to clear the
                 // accumulator and seek to the first record in this range query
-                int cmpCurrentKeyToStartKey = cmp->Compare( key, skey_slice );
+                int cmpCurrentKeyToStartKey = bigsetComparator->Compare( key, skey_slice, true ); // true => ignore actor/count (i.e., only compare set/element)
                 if ( cmpCurrentKeyToStartKey != 0 )
                 {
                     // the current key is not the specified start key, so do a seek
@@ -1180,7 +1185,7 @@ work_result RangeScanTask::operator()()
                 // if we're not including the start key in the results, skip it
                 if ( !options_.start_inclusive
                      && iter->Valid()
-                     && cmp->Compare( iter->key(), skey_slice ) == 0 )
+                     && bigsetComparator->Compare( iter->key(), skey_slice, true ) == 0 )
                 {
                     iter->Next();
                     bigset_acc_->Clear();
