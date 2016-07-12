@@ -49,7 +49,14 @@ namespace bigset {
 
 class BigsetComparator : public leveldb::Comparator
 {
-  protected:
+    enum eSigValue
+    {
+        SigValInvalid = 0x49f32bea,
+        SigValValid   = 0x943fb2ae
+    };
+    eSigValue m_Signature;
+
+protected:
     // helper methods
     static bool IsClock( const leveldb::Slice& s );
     static bool IsHoff( const leveldb::Slice& s );
@@ -57,8 +64,10 @@ class BigsetComparator : public leveldb::Comparator
     static bool IsEnd( const leveldb::Slice& s );
 
   public:
-    BigsetComparator() {}
-    virtual ~BigsetComparator() {}
+    BigsetComparator() : m_Signature( SigValValid ) {}
+    virtual ~BigsetComparator() { m_Signature = SigValInvalid; }
+
+    bool IsValid() const { return SigValValid == m_Signature; }
 
     // overload of the Compare() method that optionally compares only up to the Element name
     int Compare( const leveldb::Slice& a, const leveldb::Slice& b, bool IgnoreActorCountForElement ) const;

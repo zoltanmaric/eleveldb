@@ -949,10 +949,12 @@ work_result RangeScanTask::operator()()
 
     bool useErlangBinaryFormat = false;
     bool haveBigsetStartKey = false;
+    bool doingBigsetRangeQuery = false;
     if ( options_.isBigset_ )
     {
         useErlangBinaryFormat = bigset_acc_->UseErlangBinaryFormat();
         haveBigsetStartKey = !options_.bigsetStartKey_.empty();
+        doingBigsetRangeQuery = haveBigsetStartKey || has_end_key_;
     }
 
     ErlNifEnv* env     = local_env_;
@@ -960,6 +962,7 @@ work_result RangeScanTask::operator()()
     ErlNifEnvFreeHelper msgEnvFreeHelper( msg_env ); // ensure we free this
 
     leveldb::ReadOptions read_options;
+    std::string errMsg;
 
     read_options.fill_cache = options_.fill_cache;
     read_options.verify_checksums = options_.verify_checksums;
@@ -973,7 +976,8 @@ work_result RangeScanTask::operator()()
     // seek to the starting point of this scan
     if ( haveBigsetStartKey )
     {
-        // we are doing a range query on a bigset, so we start at the beginning
+        // we are doing a range query on a bigset, and the caller specified a
+        // start_key; however, we need to start at the beginning
         // of the bigset to get the clock and tombstone keys
         const leveldb::Slice bigsetStartKeySlice( options_.bigsetStartKey_ );
         iter->Seek( bigsetStartKeySlice );
@@ -992,6 +996,22 @@ work_result RangeScanTask::operator()()
     size_t num_read   = 0;
     uint32_t numInBatch = 0; // number of records we've added to the current send buffer; this must be a 32-bit value
 
+    // if we are doing a bigset range query, we need to use the BigsetComparator-specific
+    // version of Compare() when we do start_key/end_key comparisons below
+    const basho::bigset::BigsetComparator* bigsetComparator = NULL;
+    if ( doingBigsetRangeQuery )
+    {
+        bigsetComparator = basho::bigset::BigsetComparator::GetComparator();
+        if ( NULL == bigsetComparator || !bigsetComparator->IsValid() )
+        {
+            errMsg = "BigsetComparator is not valid";
+            leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                          "RangeScanTask: unable to begin bigset query: %s", errMsg.c_str() );
+            sendMsg( msg_env, ATOM_STREAMING_ERROR, pid, errMsg.c_str() );
+            return work_result( local_env(), ATOM_ERROR, ATOM_STREAMING_ERROR );
+        }
+    }
+
     //------------------------------------------------------------
     // Skip if not including first key and first key exists
     //------------------------------------------------------------
@@ -1009,21 +1029,36 @@ work_result RangeScanTask::operator()()
     while ( !sync_obj_->IsConsumerDead() )
     {
         leveldb::Slice key, value;
-        std::string errMsg;
 
         //------------------------------------------------------------
         // If reached end (iter invalid) or we've reached the
         // specified limit on number of items (options_.limit), or the
         // current key is past end key, send the batch and break out of the loop
         //------------------------------------------------------------
-  
-        if (!iter->Valid()
-            || (options_.limit > 0 && num_read >= options_.limit)
-            || (has_end_key_ &&
-                (options_.end_inclusive ?
-                 cmp->Compare(iter->key(), ekey_slice) > 0 :
-                 cmp->Compare(iter->key(), ekey_slice) >= 0
-                )))
+        bool doneIterating = false;
+        if ( !iter->Valid() || (options_.limit > 0 && num_read >= options_.limit) )
+        {
+            // we've either reached the end or exceeded the count of records to return
+            doneIterating = true;
+        }
+        else if ( has_end_key_ )
+        {
+            // we have an end key to compare against, so compare against it
+            int cmpCurrentKeyToStartKey;
+            if ( doingBigsetRangeQuery )
+            {
+                cmpCurrentKeyToStartKey = bigsetComparator->Compare( iter->key(), ekey_slice, true ); // true => ignore actor/count (i.e., only compare set/element)
+            }
+            else
+            {
+                cmpCurrentKeyToStartKey = cmp->Compare( iter->key(), ekey_slice );
+            }
+
+            // have we reached (or exceeded) the end key?
+            doneIterating = (options_.end_inclusive ? cmpCurrentKeyToStartKey > 0 : cmpCurrentKeyToStartKey >= 0);
+        }
+
+        if ( doneIterating )
         {
             // if we are processing bigset elements, we may have an in-flight
             // element that we need to add to the output buffer
@@ -1173,10 +1208,6 @@ work_result RangeScanTask::operator()()
 
                 leveldb::Log( m_DbPtr->m_Db->GetLogger(),
                               "RangeScanTask: finished reading bigset metadata (start_inclusive=%s)", options_.start_inclusive ? "true" : "false" );
-
-                // since we are doing bigset stuff, we know we are using the BigsetComparator
-                const basho::bigset::BigsetComparator* bigsetComparator =
-                                                         reinterpret_cast<const basho::bigset::BigsetComparator*>( cmp );
 
                 // if the range query start key matches the current key, then
                 // we don't need to do anything, else we need to clear the
