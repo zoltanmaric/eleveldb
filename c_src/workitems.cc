@@ -1001,6 +1001,8 @@ work_result RangeScanTask::operator()()
         && iter->Valid()
         && cmp->Compare(iter->key(), skey_slice) == 0)
     {
+        leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                      "RangeScanTask: skipping first record (start_inclusive=false)" );
         iter->Next();
     }
 
@@ -1027,6 +1029,8 @@ work_result RangeScanTask::operator()()
             // element that we need to add to the output buffer
             if ( options_.isBigset_ && bigset_acc_->ProcessingElement() )
             {
+                leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                              "RangeScanTask: processing last bigset element (end_inclusive=%s)", options_.end_inclusive ? "true" : "false" );
                 try
                 {
                     // we have an element that we've partially processed, so
@@ -1149,6 +1153,7 @@ work_result RangeScanTask::operator()()
             
         }
 
+        bool iterator_advanced = false; // set to true if we skip to the start of the bigset range
         if ( options_.isBigset_ )
         {
             if ( !ProcessBigsetRecord( key, value, filter_passed, recordsConsidered, errMsg ) )
@@ -1166,6 +1171,9 @@ work_result RangeScanTask::operator()()
                 // clear the haveBigsetStartKey flag so that we only do this once
                 haveBigsetStartKey = false;
 
+                leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                              "RangeScanTask: finished reading bigset metadata (start_inclusive=%s)", options_.start_inclusive ? "true" : "false" );
+
                 // since we are doing bigset stuff, we know we are using the BigsetComparator
                 const basho::bigset::BigsetComparator* bigsetComparator =
                                                          reinterpret_cast<const basho::bigset::BigsetComparator*>( cmp );
@@ -1177,8 +1185,13 @@ work_result RangeScanTask::operator()()
                 if ( cmpCurrentKeyToStartKey != 0 )
                 {
                     // the current key is not the specified start key, so do a seek
+                    leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                                  "RangeScanTask: seeking to start of bigset range" );
+
                     iter->Seek( skey_slice );
                     bigset_acc_->Clear();
+                    filter_passed = false;
+                    iterator_advanced = true;
                 }
 
                 // if we're not including the start key in the results, skip it
@@ -1186,9 +1199,13 @@ work_result RangeScanTask::operator()()
                      && iter->Valid()
                      && bigsetComparator->Compare( iter->key(), skey_slice, true ) == 0 )
                 {
+                    leveldb::Log( m_DbPtr->m_Db->GetLogger(),
+                                  "RangeScanTask: skipping start key of bigset range" );
+
                     iter->Next();
                     bigset_acc_->Clear();
                     filter_passed = false;
+                    iterator_advanced = true;
                 }
             }
         }
@@ -1247,7 +1264,10 @@ work_result RangeScanTask::operator()()
             //	  COUT("Filter DIDN'T pass");
 	    }
 
-        iter->Next();
+        if ( !iterator_advanced )
+        {
+            iter->Next();
+        }
     }
 
     //------------------------------------------------------------
