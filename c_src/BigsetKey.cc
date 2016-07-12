@@ -117,7 +117,7 @@ uint64_t GetCounter( Slice& s )
 
 Slice GetKeyType( Slice& s )
 {
-    Slice res = Slice( s.data(), 1 ); // one byte c, e, or z
+    Slice res = Slice( s.data(), 1 ); // one byte c, d, e, or z
     s.remove_prefix( 1 );
     return res;
 }
