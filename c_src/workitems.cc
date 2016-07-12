@@ -1179,7 +1179,6 @@ work_result RangeScanTask::operator()()
                     // the current key is not the specified start key, so do a seek
                     iter->Seek( skey_slice );
                     bigset_acc_->Clear();
-                    filter_passed = false;
                 }
 
                 // if we're not including the start key in the results, skip it
