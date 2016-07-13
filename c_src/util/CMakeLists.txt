@@ -13,6 +13,7 @@ add_library(gtest_main STATIC ${GTEST_DIR}/src/gtest_main.cc)
 
 set(SOURCE_FILES
     buffer.h
+    erlangUtils.cc
     stringUtils.cc)
 
 #add_library(BashoUtils STATIC ${SOURCE_FILES})

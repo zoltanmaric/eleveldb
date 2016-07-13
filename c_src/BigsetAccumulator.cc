@@ -1,9 +1,35 @@
+// -------------------------------------------------------------------
+//
+// BigsetAccumulator.cc: Implementation of the BigsetAccumulator class, which
+// assists with processing bigset records stored in leveldb
+//
+// Copyright (c) 2016 Basho Technologies, Inc. All Rights Reserved.
+//
+// This file is provided to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License.  You may obtain
+// a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+//
+// -------------------------------------------------------------------
+
 #include "BigsetAccumulator.h"
 #include "BigsetKey.h"
 
 namespace basho {
 namespace bigset {
 
+// determines if the current element is in the bigset by checking against the
+// set tombstone; if the element is in, sets m_ElementReady to true and
+// prepares the K/V pair we send to the caller
 void
 BigsetAccumulator::FinalizeElement()
 {

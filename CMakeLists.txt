@@ -55,11 +55,14 @@ set(ELEVELDB_SRCS
 
 add_library(eleveldb ${ELEVELDB_SRCS})
 
-add_executable(bigsetClockValidationTool c_src/test/bigsetClockValidationTool.cc c_src/BigsetClock.cc)
-target_link_libraries(bigsetClockValidationTool eleveldb)
+add_executable(bigsetClockValidationTool c_src/test/bigsetClockValidationTool.cc c_src/BigsetClock.cc c_src/util/erlangUtils.cc c_src/util/stringUtils.cc)
+target_link_libraries(bigsetClockValidationTool)
 
-add_executable(bigsetClock_test c_src/test/bigsetClock_test.cc c_src/BigsetClock.cc)
-target_link_libraries(bigsetClock_test gtest_main gtest_all eleveldb)
+add_executable(bigsetClock_test c_src/test/bigsetClock_test.cc c_src/BigsetClock.cc c_src/util/erlangUtils.cc c_src/util/stringUtils.cc)
+target_link_libraries(bigsetClock_test gtest_main gtest_all)
 
 add_executable(buffer_test c_src/util/test/buffer_test.cc)
 target_link_libraries(buffer_test gtest_main gtest_all)
+
+add_executable(stringUtils_test c_src/util/test/stringUtils_test.cc c_src/util/stringUtils.cc)
+target_link_libraries(stringUtils_test gtest_main gtest_all)

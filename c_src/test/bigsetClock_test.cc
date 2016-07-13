@@ -1,6 +1,25 @@
+// -------------------------------------------------------------------
 //
-// Created by Paul A. Place on 1/22/16.
+// bigsetClock_test.cc: unit tests for the BigsetClock class, and its
+// associated helper classes.
 //
+// Copyright (c) 2016 Basho Technologies, Inc. All Rights Reserved.
+//
+// This file is provided to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License.  You may obtain
+// a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+//
+// -------------------------------------------------------------------
 
 #include "utils.h"
 #include <BigsetClock.h>
@@ -145,9 +164,6 @@ TEST(VersionVector, AddPair)
     event = 0;
     ASSERT_TRUE( vv.ContainsActor( actor1, &event ) );
     ASSERT_EQ( 102, event );
-
-    // if we add a pair with the tombstone flag set, then the pair should not be added
-    ASSERT_FALSE( vv.AddPair( actor1, 1001, true ) );
 }
 
 TEST(VersionVector, Merge_Idempotent)
@@ -302,7 +318,7 @@ TEST(VersionVector, ToBinaryValue_Empty)
 
     VersionVector vvEmpty;
     basho::bigset::Buffer vvBuff;
-    ASSERT_TRUE( vvEmpty.ToBinaryValue( vvBuff ) );
+    ASSERT_TRUE( vvEmpty.ToBinaryValue( vvBuff, false ) );
     ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
     ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
 }
@@ -328,7 +344,7 @@ TEST(VersionVector, ToBinaryValue_SinglePair)
     vv.AddPair( actor, 3 );
 
     basho::bigset::Buffer vvBuff;
-    ASSERT_TRUE( vv.ToBinaryValue( vvBuff ) );
+    ASSERT_TRUE( vv.ToBinaryValue( vvBuff, false ) );
     ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
     ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
 }
@@ -360,7 +376,7 @@ TEST(VersionVector, ToBinaryValue_TwoPairs)
     vv.AddPair( actor, 5 );
 
     basho::bigset::Buffer vvBuff;
-    ASSERT_TRUE( vv.ToBinaryValue( vvBuff ) );
+    ASSERT_TRUE( vv.ToBinaryValue( vvBuff, false ) );
     ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
     ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
 }
@@ -386,7 +402,7 @@ TEST(VersionVector, ToBinaryValue_LargeEvent)
     vv.AddPair( actor, 3001 );
 
     basho::bigset::Buffer vvBuff;
-    ASSERT_TRUE( vv.ToBinaryValue( vvBuff ) );
+    ASSERT_TRUE( vv.ToBinaryValue( vvBuff, false ) );
     ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
     ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
 }
@@ -418,7 +434,7 @@ TEST(VersionVector, ToBinaryValue_BignumEvent)
     vv.AddPair( actor, 18446744073709551615ull );
 
     basho::bigset::Buffer vvBuff;
-    ASSERT_TRUE( vv.ToBinaryValue( vvBuff ) );
+    ASSERT_TRUE( vv.ToBinaryValue( vvBuff, false ) );
     ASSERT_EQ( expectedBinarySizeInBytes, vvBuff.GetBytesUsed() );
     ASSERT_EQ( 0, ::memcmp( expectedBinaryValue, vvBuff.GetBuffer(), expectedBinarySizeInBytes ) );
 }
