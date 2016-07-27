@@ -29,6 +29,11 @@ basic_schema_test() ->
     cuttlefish_unit:assert_config(Config, "eleveldb.delete_threshold", 1000),
     cuttlefish_unit:assert_config(Config, "eleveldb.compression", true),
     cuttlefish_unit:assert_config(Config, "eleveldb.tiered_slow_level", 0),
+
+    cuttlefish_unit:assert_config(Config, "eleveldb.expiry_enabled", false),
+    cuttlefish_unit:assert_config(Config, "eleveldb.expiry_minutes", 20160),
+    cuttlefish_unit:assert_config(Config, "eleveldb.whole_file_expiry", true),
+
     cuttlefish_unit:assert_not_configured(Config, "eleveldb.tiered_fast_prefix"),
     cuttlefish_unit:assert_not_configured(Config, "eleveldb.tiered_slow_prefix"),
 
@@ -61,7 +66,9 @@ override_schema_test() ->
             {["leveldb", "compaction", "trigger", "tombstone_count"], off},
             {["leveldb", "tiered"], "2"},
             {["leveldb", "tiered", "path", "fast"], "/mnt/speedy"},
-            {["leveldb", "tiered", "path", "slow"], "/mnt/slowpoke"}
+            {["leveldb", "tiered", "path", "slow"], "/mnt/slowpoke"},
+            {["leveldb", "expiration", "retention_time"], "1s"},
+            {["leveldb", "expiration", "mode"], "whole_file"}
            ],
 
     %% The defaults are defined in ../priv/eleveldb.schema.
@@ -88,6 +95,9 @@ override_schema_test() ->
     cuttlefish_unit:assert_config(Config, "eleveldb.tiered_slow_level", 2),
     cuttlefish_unit:assert_config(Config, "eleveldb.tiered_fast_prefix", "/mnt/speedy"),
     cuttlefish_unit:assert_config(Config, "eleveldb.tiered_slow_prefix", "/mnt/slowpoke"),
+
+    cuttlefish_unit:assert_config(Config, "eleveldb.expiry_minutes", 1),
+    cuttlefish_unit:assert_config(Config, "eleveldb.whole_file_expiry", true),    
 
     %% Make sure no multi_backend
     %% Warning: The following line passes by coincidence. It's because the

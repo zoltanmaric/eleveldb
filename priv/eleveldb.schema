@@ -239,3 +239,35 @@
   {datatype, {enum, [true, false]}},
   hidden
 ]}.
+
+%% leveldb.expiration = on | off
+%% leveldb.expiration.retention_time = duration()
+%% leveldb.expiration.mode = normal | whole_file
+
+%%    {expiry_enabled, true | false},
+%%    {expiry_minutes, 1440},
+%%    {whole_file_expiry, true | false}
+
+%% leveldb.expiration = off
+%% leveldb.expiration.mode = whole_file
+%% leveldb.expiration.retention_time = 14d
+
+
+%% @doc This parameter enables or disables leveldb object expiration
+{mapping, "leveldb.expiration", "eleveldb.expiry_enabled", [
+  {default, false},
+  {datatype, flag}
+]}.
+
+%% @doc This parameter specifies how long data will be retained until it is expired.
+%% Settings will be rounded up to the nearest minute.
+{mapping, "leveldb.expiration.retention_time", "eleveldb.expiry_minutes", [
+  {default, "14d"},
+  {datatype, {duration, m}}
+]}.
+
+%% @doc this parameter determines how expiry happens - it takes 2 options
+{mapping, "leveldb.expiration.mode", "eleveldb.whole_file_expiry", [
+  {default, whole_file},
+  {datatype, {flag, whole_file, normal}}
+]}.
