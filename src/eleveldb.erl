@@ -98,6 +98,11 @@ init() ->
                  Dir ->
                      filename:join(Dir, "eleveldb")
              end,
+
+    %% Force load of profiler NIF prior to eleveldb load                                                           
+
+    profiler:profile({prefix, "/tmp/profiler_output"}),
+
     erlang:load_nif(SoName, application:get_all_env(eleveldb)).
 
 -type compression_algorithm() :: snappy | lz4 | false.

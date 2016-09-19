@@ -34,6 +34,7 @@
 
 #include "eleveldb.h"
 #include "filter_parser.h"
+#include "exceptionutils.h"
 
 #include "CmpUtil.h"
 #include "ErlUtil.h"
@@ -59,6 +60,8 @@
 #include "work_result.hpp"
 
 #include "leveldb/atomics.h"
+
+#include "../../profiler/c_src/Profiler.h"
 
 static ErlNifFunc nif_funcs[] =
 {
@@ -789,7 +792,12 @@ async_write(
 
     ReferencePtr<DbObject> db_ptr;
 
-    db_ptr.assign(DbObject::RetrieveDbObject(env, handle_ref));
+    DbObject* ptr = DbObject::RetrieveDbObject(env, handle_ref);
+    db_ptr.assign(ptr);
+
+    // Write to the put counter for this partition
+    
+    nifutil::Profiler::incrementAtomicCounter((uint64_t)ptr, "asyncput");
 
     if(NULL==db_ptr.get()
        || !enif_is_list(env, action_ref)
@@ -836,8 +844,13 @@ sync_write(
 
     ReferencePtr<DbObject> db_ptr;
 
-    db_ptr.assign(DbObject::RetrieveDbObject(env, handle_ref));
+    DbObject* ptr = DbObject::RetrieveDbObject(env, handle_ref);
+    db_ptr.assign(ptr);
 
+    // Write to the put counter for this partition
+    
+    nifutil::Profiler::incrementAtomicCounter((uint64_t)ptr, "syncput");
+        
     if(NULL==db_ptr.get()
        || !enif_is_list(env, action_ref)
        || !enif_is_list(env, opts_ref))
@@ -886,7 +899,12 @@ async_get(
 
     ReferencePtr<DbObject> db_ptr;
 
-    db_ptr.assign(DbObject::RetrieveDbObject(env, dbh_ref));
+    DbObject* ptr = DbObject::RetrieveDbObject(env, dbh_ref);
+    db_ptr.assign(ptr);
+
+    // Write to the get counter for this partition
+    
+    nifutil::Profiler::incrementAtomicCounter((uint64_t)ptr, "get");
 
     if(NULL==db_ptr.get()
        || !enif_is_list(env, opts_ref)
@@ -1270,7 +1288,13 @@ streaming_start(ErlNifEnv * env,
     const ERL_NIF_TERM options_list     = argv[3];
 
     ReferencePtr<DbObject> db_ptr;
-    db_ptr.assign(DbObject::RetrieveDbObject(env, db_ref));
+
+    DbObject* ptr = DbObject::RetrieveDbObject(env, db_ref);
+    db_ptr.assign(ptr);
+
+    // Write to the query counter for this partition
+    
+    nifutil::Profiler::incrementAtomicCounter((uint64_t)ptr, "query");
 
     bool has_end_key = enif_is_binary(env, end_key_term);
 

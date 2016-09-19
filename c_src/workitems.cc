@@ -36,6 +36,8 @@
 #include "leveldb/filter_policy.h"
 #include "leveldb/perf_count.h"
 
+#include "../../profiler/c_src/Profiler.h"
+
 // error_tuple duplicated in workitems.cc and eleveldb.cc ... how to fix?
 static ERL_NIF_TERM error_tuple(ErlNifEnv* env, ERL_NIF_TERM error, leveldb::Status& status)
 {
@@ -176,6 +178,8 @@ OpenTask::DoWork()
     // create a resource reference to send erlang
     ERL_NIF_TERM result = enif_make_resource(local_env(), db_ptr_ptr);
 
+    nifutil::Profiler::addRingPartition((uint64_t)(*(DbObject**)db_ptr_ptr), db_name);
+    
     // clear the automatic reference from enif_alloc_resource in CreateDbObject
     enif_release_resource(db_ptr_ptr);
 
