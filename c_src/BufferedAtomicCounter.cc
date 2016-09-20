@@ -16,7 +16,7 @@ BufferedAtomicCounter::AtomicCounter::AtomicCounter()
 #ifdef __APPLE__
     counts_ = 0;
 #else
-    __sync_fetch_and_sub(&counts_, 0);
+    counts_ = 0;
 #endif
 }
 
