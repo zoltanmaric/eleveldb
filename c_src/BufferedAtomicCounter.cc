@@ -86,9 +86,6 @@ void BufferedAtomicCounter::increment(uint64_t currentMicroSeconds)
 
     unsigned int minorInd = (currentMicroSeconds % majorIntervalMs_) / minorIntervalMs_;
 
-    COUT("Current MS = " << currentMicroSeconds << " major = " << majorIntervalMs_ << " majorInd = " << majorInd << " minorInd = " << minorInd);
-
-
     //------------------------------------------------------------
     // Increment the appropriate counter
     //------------------------------------------------------------
