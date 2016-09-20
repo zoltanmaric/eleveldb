@@ -117,6 +117,7 @@ namespace nifutil {
         uint64_t majorIntervalUs_;
         std::string atomicCounterOutput_;
         bool firstDump_;
+        bool countersInitialized_;
         
         static Profiler instance_;
         static bool noop_;
