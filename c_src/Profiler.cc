@@ -483,9 +483,11 @@ void Profiler::dumpAtomicCounters()
             std::fstream outfile;
             std::ostringstream os;
 
-            FOUT("About to open output file: " << atomicCounterOutput_);
-            outfile.open(atomicCounterOutput_.c_str(), std::fstream::out|std::fstream::app);
-            FOUT("About to open output file: " << atomicCounterOutput_ << ".. success");
+            if(firstDump_)
+                outfile.open(atomicCounterOutput_.c_str(), std::fstream::out);
+            else
+                outfile.open(atomicCounterOutput_.c_str(), std::fstream::out|std::fstream::app);
+ 
             uint64_t timestamp = (getCurrentMicroSeconds()/majorIntervalUs_ - 1) * majorIntervalUs_;
             
             //------------------------------------------------------------
