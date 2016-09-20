@@ -131,6 +131,8 @@ namespace eleveldb {
         static uint64_t getValAsUint64(ErlNifEnv* env, ERL_NIF_TERM term, bool exact=true);
         static double   getValAsDouble(ErlNifEnv* env, ERL_NIF_TERM term, bool exact=true);
 
+        static bool     getBool(ErlNifEnv* env, ERL_NIF_TERM term);
+
         static std::string formatTerm(ErlNifEnv* env, ERL_NIF_TERM term);
 
         static std::string formatAtom(  ErlNifEnv* env, ERL_NIF_TERM term);

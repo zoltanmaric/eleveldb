@@ -36,7 +36,7 @@
 #include "leveldb/filter_policy.h"
 #include "leveldb/perf_count.h"
 
-#include "../../profiler/c_src/Profiler.h"
+#include "Profiler.h"
 
 // error_tuple duplicated in workitems.cc and eleveldb.cc ... how to fix?
 static ERL_NIF_TERM error_tuple(ErlNifEnv* env, ERL_NIF_TERM error, leveldb::Status& status)

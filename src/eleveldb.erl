@@ -43,7 +43,8 @@
          parse_string/1,
          is_empty/1,
          encode/2,
-         current_usec/0]).
+         current_usec/0,
+	 profile/1, profile/2]).
 
 %% for testing
 -export([
@@ -98,10 +99,6 @@ init() ->
                  Dir ->
                      filename:join(Dir, "eleveldb")
              end,
-
-    %% Force load of profiler NIF prior to eleveldb load                                                           
-
-    profiler:profile({prefix, "/tmp/profiler_output"}),
 
     erlang:load_nif(SoName, application:get_all_env(eleveldb)).
 
@@ -509,7 +506,80 @@ validate_options(Type, Opts) ->
                             validate_type(KType, V)
                     end, Opts).
 
+%% ------------------------------------------------------------
+%% The underlying interface to the profiler.  
+%%
+%% This interface is NOT controlled by the PROFILE -define in
+%% profiler.hrl.  
+%%
+%% This interface is exported in addition to the recommended interface
+%% (perf_profile/1) for convenience, so that profiling can be turned
+%% off globally, but isolated profiling can still be done.  I.e., with
+%% -define(PROFILE). commented out,
+%%
+%%     profiler:perf_profile({start, 'mycounter'})
+%%
+%% is a no-op, but  
+%% 
+%%     profiler:profile({start, 'mycounter'})
+%%
+%% is not.
+%%
+%% Usage:
+%%
+%% profile/1 is a multi-use function whose single argument is a tuple
+%% of
+%%
+%% {command, val1, val2,...}
+%%
+%% combinations.
+%%
+%% Recognized commands are:
+%%
+%%    {start, 'mylabel', [true | false]} 
+%%
+%%        Start a counter, and associate the label 'mylabel' with it.
+%%        If specified, the last argument determines whether the
+%%        counter is a global counter, or a per-thread counter.
+%%
+%%    {stop, 'mylabel', [true | false]}
+%%
+%%        Stop the counter with label 'mylabel' associated with it.
+%%        If specified, the last argument determines whether the
+%%        counter is a global counter, or a per-thread counter.
+%%
+%%    {noop, true | false} 
+%%
+%%        If true, make the underlying C++ code a no-op.  This is
+%%        provided in addition to the -define(PROFILE) method of
+%%        no-op'ing this module, so that profiling can be turned
+%%        on/off manually for debugging purposes.
+%%            
+%%        Note that when the profiler has been no-op'd in this way,
+%%        profiling calls can still be manually made by using the
+%%        profile/2 interface, with the second argument set to true.
+%%
+%%    {prefix, 'some/path'} 
+%%
+%%        Set the directory prefix for profiler output files.  On
+%%        process exit, the profiler dumps all profiling stats to a
+%%        single file called pid'_profiler.txt', where pid is the
+%%        process id.
+%%
+%%    {dump, 'myfile'}  
+%%
+%%        Manually dump profiler stats to the file 'myfile'
+%%
+%%    {debug}               
+%%
+%%        Print debugging information about the profiler to stdout
+%% ------------------------------------------------------------
 
+profile(_Tuple) ->
+    erlang:nif_error({error, not_loaded}).
+
+profile(_Tuple, _Always) ->
+    erlang:nif_error({error, not_loaded}).
 
 %% ===================================================================
 %% Internal functions

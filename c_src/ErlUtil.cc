@@ -888,6 +888,26 @@ uint8_t ErlUtil::getValAsUint8(ErlNifEnv* env, ERL_NIF_TERM term, bool exact)
 }
 
 /**.......................................................................
+ * Try to convert the erlang value in term to a boolean
+ */
+bool ErlUtil::getBool(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    //------------------------------------------------------------
+    // Atoms can be represented as uint8_t if they are boolean values
+    //------------------------------------------------------------
+
+    if(ErlUtil::isAtom(env, term)) {
+        std::string atom = ErlUtil::getAtom(env, term);
+        return atom == "true";
+    }
+
+    ThrowRuntimeError("Erlang value " << formatTerm(env, term) 
+                      << " can't be represented as a bool");
+
+    return false;
+}
+
+/**.......................................................................
  * Try to convert the erlang value in term to a 64-bit unsigned integer
  */
 uint64_t ErlUtil::getValAsUint64(ErlNifEnv* env, ERL_NIF_TERM term, bool exact)
