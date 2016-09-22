@@ -477,8 +477,6 @@ void Profiler::dumpAtomicCounters()
 {
     try {
 
-        FOUT("Inside dumpAtomicCounters" << (atomicCounterMap_.begin() == atomicCounterMap_.end()) << " size = " << instance_.atomicCounterMap_.size() << " this = " << this);
-        
         if(atomicCounterMap_.begin() != atomicCounterMap_.end()) {
             std::fstream outfile;
             std::ostringstream os;
@@ -487,8 +485,11 @@ void Profiler::dumpAtomicCounters()
                 outfile.open(atomicCounterOutput_.c_str(), std::fstream::out);
             else
                 outfile.open(atomicCounterOutput_.c_str(), std::fstream::out|std::fstream::app);
- 
-            uint64_t timestamp = (getCurrentMicroSeconds()/majorIntervalUs_ - 1) * majorIntervalUs_;
+
+            uint64_t cms = getCurrentMicroSeconds();
+            uint64_t timestamp = (cms/majorIntervalUs_ - 1) * majorIntervalUs_;
+
+            FOUT("CMS = " << cms << " timestamp = " << timestamp);
             
             //------------------------------------------------------------
             // If this is the first time we've written to the output file,
