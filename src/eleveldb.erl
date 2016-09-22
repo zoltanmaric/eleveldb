@@ -44,6 +44,7 @@
          is_empty/1,
          encode/2,
          current_usec/0,
+         print_current_usec/0,
 	 profile/1, profile/2]).
 
 %% for testing
@@ -350,6 +351,9 @@ do_streaming_fold_test1(StreamRef = {MsgRef, AckRef}, Fun, Acc) ->
 
 current_usec() ->
     erlang:nif_error({error, not_loaded}).
+
+print_current_usec() ->
+    io:format("~p~n", [current_usec()]).
 
 parse_string(Bin) ->
     parse_string(0, 0, Bin).
