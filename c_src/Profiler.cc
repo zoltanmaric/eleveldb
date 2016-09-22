@@ -307,12 +307,8 @@ int64_t Profiler::getCurrentMicroSeconds()
 #if _POSIX_TIMERS >= 200801L
 
 struct timespec ts;
-
-// this is rumored to be faster that gettimeofday(), and sometimes
-// shift less ... someday use CLOCK_MONOTONIC_RAW
-
- clock_gettime(CLOCK_MONOTONIC, &ts);
- return static_cast<uint64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec/1000;
+clock_gettime(CLOCK_REALTIME, &ts);
+return static_cast<uint64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec/1000;
 
 #else
 
