@@ -38,6 +38,7 @@ namespace nifutil {
         std::string listTags();
         
         std::string leveldbFile_;
+        unsigned mapIndex_;
         std::map<std::string, BufferedAtomicCounter> counterMap_;
         
     }; // End class RingPartition

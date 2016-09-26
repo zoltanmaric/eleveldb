@@ -67,6 +67,104 @@ void Profiler::Counter::stop(int64_t usec, unsigned count)
 }
 
 //=======================================================================
+// EventBuffer
+//=======================================================================
+
+void Profiler::Event::setTo(uint64_t microSeconds, std::string flagName, bool on)
+{
+    microSeconds_ = microSeconds;
+    name_         = flagName;
+    on_           = on;
+}
+
+Profiler::EventBuffer::EventBuffer()
+{
+    initialize(0);
+}
+
+Profiler::EventBuffer::EventBuffer(unsigned maxSize)
+{
+    initialize(maxSize);
+}
+
+void Profiler::EventBuffer::initialize(unsigned maxSize)
+{
+    mutex_.Lock();
+
+    events_.resize(maxSize);
+
+    maxSize_   = maxSize;
+    nextIndex_ = 0;
+    firstDump_ = true;
+    fileName_  = "/tmp/eventFile.txt";
+    
+    mutex_.Unlock();
+}
+
+void Profiler::EventBuffer::setFileName(std::string fileName)
+{
+    mutex_.Lock();
+    fileName_  = fileName;
+    mutex_.Unlock();
+}
+
+void Profiler::EventBuffer::add(uint64_t microSeconds, std::string flagName, bool on,
+                           std::map<uint64_t, RingPartition>& ringMap)
+{
+    mutex_.Lock();
+
+    events_[nextIndex_].setTo(microSeconds, flagName, on);
+    nextIndex_ = (nextIndex_ + 1) % maxSize_;
+
+    // If this write just filled the buffer, dump it out and reset
+    
+    if(nextIndex_ == 0)
+        dump(ringMap);
+    
+    mutex_.Unlock();
+}
+
+/**
+* Dump the event buffer and reset its indices
+*/
+void Profiler::EventBuffer::dump(std::map<uint64_t, RingPartition>& ringMap)
+{
+    mutex_.Lock();
+        
+    std::fstream outfile;
+
+    if(firstDump_)
+        outfile.open(fileName_.c_str(), std::fstream::out);
+    else
+        outfile.open(fileName_.c_str(), std::fstream::out|std::fstream::app);
+
+    if(firstDump_) {
+        outfile << "partitions: ";
+
+        for(std::map<uint64_t, RingPartition>::iterator iter=ringMap.begin();
+            iter != ringMap.end(); iter++)
+            outfile << iter->second.leveldbFile_ << " ";
+        outfile << std::endl;
+
+        firstDump_ = false;
+    }
+
+    for(unsigned i=0; i < nextIndex_; i++)
+        outfile << events_[i] << std::endl;
+
+    nextIndex_ = 0;
+    outfile.close();
+    
+    mutex_.Unlock();
+}
+
+std::ostream& operator<<(std::ostream& os, const Profiler::Event& event)
+{
+    os << event.microSeconds_ << " " << event.name_ << " " << (event.on_ ? 1 : 0);
+    return os;
+}
+
+//=======================================================================
 // Profiler
 //=======================================================================
 
@@ -428,13 +526,18 @@ void Profiler::initializeAtomicCounters(std::map<std::string, std::string>& name
     FOUT("About to initializeAtomicCounter with id = " <<  instance_.atomicCounterTimerId_ << " and filename = " << fileName);
     
     if(instance_.atomicCounterTimerId_== 0) {
-        
+        unsigned mapIndex = 0;
         for(std::map<uint64_t, RingPartition>::iterator part = instance_.atomicCounterMap_.begin();
             part != instance_.atomicCounterMap_.end(); part++) {
             
             for(std::map<std::string,std::string>::iterator iter = nameMap.begin(); iter != nameMap.end(); iter++) {
                 part->second.counterMap_[iter->first].setTo(bufferSize, intervalUs);
             }
+
+            part->second.mapIndex_ = mapIndex;
+            
+            ++mapIndex;
+            
         }
         
         instance_.atomicCounterOutput_ = fileName;
@@ -554,4 +657,23 @@ THREAD_START(Profiler::runAtomicCounterTimer)
     } while(select(0, NULL, NULL, NULL, &timeout) == 0);
 
     return 0;
+}
+
+//=======================================================================
+// Sonogram analysis
+//=======================================================================
+
+void Profiler::addEvent(std::string flagName, bool on)
+{
+    instance_.eventBuffer_.add(getCurrentMicroSeconds(), flagName, on, instance_.atomicCounterMap_);
+}
+
+void Profiler::setEventFileName(std::string fileName)
+{
+    instance_.eventBuffer_.setFileName(fileName);
+}
+
+void Profiler::dumpEvents()
+{
+    instance_.eventBuffer_.dump(instance_.atomicCounterMap_);
 }

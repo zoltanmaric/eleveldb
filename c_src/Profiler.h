@@ -53,7 +53,37 @@ namespace nifutil {
             Counter();
         };
         
+        struct Event {
+            uint64_t microSeconds_;
+            std::string name_;
+            bool on_;
 
+            void setTo(uint64_t microSeconds, std::string flagName, bool on);
+            friend std::ostream& operator<<(std::ostream& os, const Event& event);
+        };
+        
+        struct EventBuffer {
+
+            std::vector<Event> events_;
+            unsigned nextIndex_;
+            unsigned maxSize_;
+            bool firstDump_;
+            std::string fileName_;
+            Mutex mutex_;
+
+            void setFileName(std::string fileName);
+            
+            void add(uint64_t microSeconds, std::string flagName, bool on,
+                     std::map<uint64_t, RingPartition>& ringMap);
+
+            void dump(std::map<uint64_t, RingPartition>& ringMap);
+
+            void initialize(unsigned maxSize);
+            
+            EventBuffer();
+            EventBuffer(unsigned maxSize);
+        };
+        
         virtual ~Profiler();
 
         unsigned start(std::string& label, bool perThread);
@@ -89,6 +119,14 @@ namespace nifutil {
         static void incrementAtomicCounter(uint64_t partPtr, std::string counterName);
 
         static THREAD_START(runAtomicCounterTimer);
+
+        //------------------------------------------------------------
+        // Sonogram analysis
+        //------------------------------------------------------------
+
+        static void addEvent(std::string flagName, bool on);
+        static void setEventFileName(std::string fileName);
+        static void dumpEvents();
         
     private:
 
@@ -118,11 +156,23 @@ namespace nifutil {
         std::string atomicCounterOutput_;
         bool firstDump_;
         bool countersInitialized_;
+
+        //------------------------------------------------------------
+        // Additional members for sonogram analysis
+        //------------------------------------------------------------
+
+        EventBuffer eventBuffer_;
+
+        //------------------------------------------------------------
+        // General members
+        //------------------------------------------------------------
         
         static Profiler instance_;
         static bool noop_;
         
     }; // End class Profiler
+
+    std::ostream& operator<<(std::ostream& os, const Profiler::Event& event);
 
 } // End namespace nifutil
 

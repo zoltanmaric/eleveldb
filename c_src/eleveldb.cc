@@ -1479,6 +1479,18 @@ namespace eleveldb {
                 return eleveldb::ATOM_OK;
             }
 
+            if(atom == "add_event") {
+                std::string eventName = ErlUtil::getAsString(env, cells[1]);
+                bool on = ErlUtil::getBool(env, cells[2]);
+                nifutil::Profiler::addEvent(eventName, on);
+                return eleveldb::ATOM_OK;
+            }
+
+            if(atom == "dump_events") {
+                nifutil::Profiler::dumpEvents();
+                return eleveldb::ATOM_OK;
+            }
+
             //------------------------------------------------------------
             // Output debug information
             //------------------------------------------------------------
