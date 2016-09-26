@@ -195,7 +195,6 @@ async_open(_CallerRef, _Name, _Opts) ->
 open(Name, Opts) ->
     CallerRef = make_ref(),
     Opts2 = add_open_defaults(Opts),
-    io:format("Calling open with name = ~p~n", [Name]),
     async_open(CallerRef, Name, Opts2),
     ?WAIT_FOR_REPLY(CallerRef).
 
