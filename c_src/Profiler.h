@@ -55,10 +55,11 @@ namespace nifutil {
         
         struct Event {
             uint64_t microSeconds_;
-            std::string name_;
+            std::string flagName_;
+            std::string seqName_;
             bool on_;
 
-            void setTo(uint64_t microSeconds, std::string flagName, bool on);
+            void setTo(uint64_t microSeconds, std::string seqName, std::string flagName, bool on);
             friend std::ostream& operator<<(std::ostream& os, const Event& event);
         };
         
@@ -73,10 +74,10 @@ namespace nifutil {
 
             void setFileName(std::string fileName);
             
-            void add(uint64_t microSeconds, std::string flagName, bool on,
+            void add(uint64_t microSeconds, std::string seqName, std::string flagName, bool on,
                      std::map<uint64_t, RingPartition>& ringMap);
 
-            void dump(std::map<uint64_t, RingPartition>& ringMap);
+            void dump(std::map<uint64_t, RingPartition>& ringMap, bool lock);
 
             void initialize(unsigned maxSize);
             
@@ -124,8 +125,10 @@ namespace nifutil {
         // Sonogram analysis
         //------------------------------------------------------------
 
-        static void addEvent(std::string flagName, bool on);
+        static void addEvent(std::string seqName, std::string flagName, bool on);
+        static void addEvent(std::string seqName, uint64_t partPtr, bool on);
         static void setEventFileName(std::string fileName);
+        static void initializeEventBuffer(unsigned maxSize, std::string fileName);
         static void dumpEvents();
         
     private:
@@ -162,7 +165,8 @@ namespace nifutil {
         //------------------------------------------------------------
 
         EventBuffer eventBuffer_;
-
+        bool eventsInitialized_;
+        
         //------------------------------------------------------------
         // General members
         //------------------------------------------------------------

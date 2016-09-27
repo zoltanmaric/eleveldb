@@ -210,7 +210,7 @@ work_result
 WriteTask::DoWork()
 {
     leveldb::Status status = m_DbPtr->m_Db->Write(*options, batch);
-    
+
     return (status.ok() ? work_result(ATOM_OK) : work_result(local_env(), ATOM_ERROR_DB_WRITE, status));
 }
 
@@ -1143,6 +1143,10 @@ work_result RangeScanTask::DoWork()
     if(binaryAllocated)
         enif_release_binary(&bin);
 
+    // Tag an end event for this query
+    
+    nifutil::Profiler::addEvent("query", (uint64_t)(m_DbPtr->m_Db), false);
+    
     enif_free_env(msg_env);
 
     return work_result();

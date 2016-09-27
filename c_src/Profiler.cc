@@ -29,6 +29,7 @@ Profiler::Counter::Counter()
     deltaUsec_     = 0;
 
     state_ = STATE_DONE;
+
     errorCountUninitiated_  = 0;
     errorCountUnterminated_ = 0;
 }
@@ -68,12 +69,17 @@ void Profiler::Counter::stop(int64_t usec, unsigned count)
 
 //=======================================================================
 // EventBuffer
+//
+// This buffer is used for recording realtime events.  The interface
+// is mutex-protected because it is expected that these functions (in
+// particular add()) will be called by multiple threads
 //=======================================================================
 
-void Profiler::Event::setTo(uint64_t microSeconds, std::string flagName, bool on)
+void Profiler::Event::setTo(uint64_t microSeconds, std::string seqName, std::string flagName, bool on)
 {
     microSeconds_ = microSeconds;
-    name_         = flagName;
+    seqName_      = seqName;
+    flagName_     = flagName;
     on_           = on;
 }
 
@@ -108,18 +114,21 @@ void Profiler::EventBuffer::setFileName(std::string fileName)
     mutex_.Unlock();
 }
 
-void Profiler::EventBuffer::add(uint64_t microSeconds, std::string flagName, bool on,
+void Profiler::EventBuffer::add(uint64_t microSeconds, std::string seqName, std::string flagName, bool on,
                            std::map<uint64_t, RingPartition>& ringMap)
 {
     mutex_.Lock();
 
-    events_[nextIndex_].setTo(microSeconds, flagName, on);
-    nextIndex_ = (nextIndex_ + 1) % maxSize_;
+    events_[nextIndex_].setTo(microSeconds, seqName, flagName, on);
+    unsigned index = (nextIndex_ + 1) % maxSize_;
 
     // If this write just filled the buffer, dump it out and reset
-    
-    if(nextIndex_ == 0)
-        dump(ringMap);
+
+    if(index == 0) {
+        dump(ringMap, false);
+    } else {
+        nextIndex_ = index;
+    }
     
     mutex_.Unlock();
 }
@@ -127,9 +136,10 @@ void Profiler::EventBuffer::add(uint64_t microSeconds, std::string flagName, boo
 /**
 * Dump the event buffer and reset its indices
 */
-void Profiler::EventBuffer::dump(std::map<uint64_t, RingPartition>& ringMap)
+void Profiler::EventBuffer::dump(std::map<uint64_t, RingPartition>& ringMap, bool lock)
 {
-    mutex_.Lock();
+    if(lock)
+        mutex_.Lock();
         
     std::fstream outfile;
 
@@ -154,13 +164,14 @@ void Profiler::EventBuffer::dump(std::map<uint64_t, RingPartition>& ringMap)
 
     nextIndex_ = 0;
     outfile.close();
-    
-    mutex_.Unlock();
+
+    if(lock)
+        mutex_.Unlock();
 }
 
-std::ostream& operator<<(std::ostream& os, const Profiler::Event& event)
+std::ostream& nifutil::operator<<(std::ostream& os, const Profiler::Event& event)
 {
-    os << event.microSeconds_ << " " << event.name_ << " " << (event.on_ ? 1 : 0);
+    os << event.microSeconds_ << " " << event.seqName_ << " " << event.flagName_ << (event.on_ ? 1 : 0);
     return os;
 }
 
@@ -179,6 +190,8 @@ Profiler::Profiler()
     majorIntervalUs_      = 0;
     firstDump_            = true;
     countersInitialized_  = false;
+    eventsInitialized_    = false;
+    eventBuffer_.initialize(100);
     
     setPrefix("/tmp/");
 }
@@ -188,13 +201,21 @@ Profiler::Profiler()
  */
 Profiler::~Profiler() 
 {
+    // Dump out profiling info
+    
     std::ostringstream os;
     os << prefix_ << "/" << this << "_profile.txt";
     dump(os.str());
 
-    if(atomicCounterTimerId_ != 0) {
+    // Dump out any remaining buffered event information
+
+    if(eventsInitialized_)
+        eventBuffer_.dump(atomicCounterMap_, true);
+    
+    // Kill the thread that dumps out atomic counters
+    
+    if(atomicCounterTimerId_ != 0)
         pthread_kill(atomicCounterTimerId_, SIGKILL);
-    }
 }
 
 Profiler::Counter& Profiler::getCounter(std::string& label, bool perThread)
@@ -403,17 +424,13 @@ std::string Profiler::formatStats(bool term)
 int64_t Profiler::getCurrentMicroSeconds()
 {
 #if _POSIX_TIMERS >= 200801L
-
-struct timespec ts;
-clock_gettime(CLOCK_REALTIME, &ts);
-return static_cast<uint64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec/1000;
-
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec/1000;
 #else
-
-struct timeval tv;
-gettimeofday(&tv, NULL);
-return static_cast<uint64_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
-
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return static_cast<uint64_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
 #endif
 }
 
@@ -435,7 +452,7 @@ void Profiler::setPrefix(std::string prefix)
 
 /**.......................................................................
  * Setting noop to true makes the various Profiler::profile()
- * interfaces no-ops by default.  Note that this behaviur can be
+ * interfaces no-ops by default.  Note that this behavior can be
  * overridden by calling those interfaces with always=true
  *
  * Note also that although this is a static variable whose state can
@@ -663,9 +680,31 @@ THREAD_START(Profiler::runAtomicCounterTimer)
 // Sonogram analysis
 //=======================================================================
 
-void Profiler::addEvent(std::string flagName, bool on)
+void Profiler::addEvent(std::string seqName, std::string flagName, bool on)
 {
-    instance_.eventBuffer_.add(getCurrentMicroSeconds(), flagName, on, instance_.atomicCounterMap_);
+    instance_.eventBuffer_.add(getCurrentMicroSeconds(), seqName, flagName, on, instance_.atomicCounterMap_);
+}
+
+void Profiler::addEvent(std::string seqName, uint64_t partPtr, bool on)
+{
+    std::ostringstream os;
+    os << "partition" << instance_.atomicCounterMap_[partPtr].mapIndex_;
+    instance_.eventBuffer_.add(getCurrentMicroSeconds(), seqName, os.str(), on, instance_.atomicCounterMap_);
+}
+
+void Profiler::initializeEventBuffer(unsigned maxSize, std::string fileName)
+{
+    instance_.eventBuffer_.initialize(maxSize);
+    instance_.eventBuffer_.setFileName(fileName);
+
+    unsigned mapIndex = 0;
+    for(std::map<uint64_t, RingPartition>::iterator part = instance_.atomicCounterMap_.begin();
+        part != instance_.atomicCounterMap_.end(); part++) {
+        part->second.mapIndex_ = mapIndex;
+        ++mapIndex;
+    }
+
+    instance_.eventsInitialized_ = true;
 }
 
 void Profiler::setEventFileName(std::string fileName)
@@ -675,5 +714,5 @@ void Profiler::setEventFileName(std::string fileName)
 
 void Profiler::dumpEvents()
 {
-    instance_.eventBuffer_.dump(instance_.atomicCounterMap_);
+    instance_.eventBuffer_.dump(instance_.atomicCounterMap_, true);
 }

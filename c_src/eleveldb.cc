@@ -798,10 +798,6 @@ namespace eleveldb {
         DbObject* ptr = DbObject::RetrieveDbObject(env, handle_ref);
         db_ptr.assign(ptr);
 
-        // Write to the put counter for this partition
-    
-        nifutil::Profiler::incrementAtomicCounter((uint64_t)ptr, "asyncput");
-
         if(NULL==db_ptr.get()
            || !enif_is_list(env, action_ref)
            || !enif_is_list(env, opts_ref))
@@ -850,10 +846,6 @@ namespace eleveldb {
         DbObject* ptr = DbObject::RetrieveDbObject(env, handle_ref);
         db_ptr.assign(ptr);
 
-        // Write to the put counter for this partition
-    
-        nifutil::Profiler::incrementAtomicCounter((uint64_t)ptr, "syncput");
-        
         if(NULL==db_ptr.get()
            || !enif_is_list(env, action_ref)
            || !enif_is_list(env, opts_ref))
@@ -904,10 +896,6 @@ namespace eleveldb {
 
         DbObject* ptr = DbObject::RetrieveDbObject(env, dbh_ref);
         db_ptr.assign(ptr);
-
-        // Write to the get counter for this partition
-    
-        nifutil::Profiler::incrementAtomicCounter((uint64_t)ptr, "get");
 
         if(NULL==db_ptr.get()
            || !enif_is_list(env, opts_ref)
@@ -1297,7 +1285,7 @@ namespace eleveldb {
 
         // Write to the query counter for this partition
     
-        nifutil::Profiler::incrementAtomicCounter((uint64_t)ptr, "query");
+        nifutil::Profiler::addEvent("query", (uint64_t)ptr, true);
 
         bool has_end_key = enif_is_binary(env, end_key_term);
 
@@ -1480,15 +1468,41 @@ namespace eleveldb {
             }
 
             if(atom == "add_event") {
-                std::string eventName = ErlUtil::getAsString(env, cells[1]);
-                bool on = ErlUtil::getBool(env, cells[2]);
-                nifutil::Profiler::addEvent(eventName, on);
+                std::string seqName = ErlUtil::getAsString(env, cells[1]);
+                bool on = ErlUtil::getBool(env, cells[3]);
+
+                if(ErlUtil::isString(env, cells[2])) {
+                    std::string flagName = ErlUtil::getAsString(env, cells[2]);
+                    nifutil::Profiler::addEvent(seqName, flagName, on);
+                } else {
+                    uint64_t partPtr = ErlUtil::getValAsUint64(env, cells[2]);
+                    nifutil::Profiler::addEvent(seqName, partPtr, on);
+                }
+                
                 return eleveldb::ATOM_OK;
             }
 
             if(atom == "dump_events") {
                 nifutil::Profiler::dumpEvents();
                 return eleveldb::ATOM_OK;
+            }
+
+            if(atom == "init_event_buffer") {
+
+                if(ErlUtil::isTuple(env, cells[1])) {
+
+                    std::vector<ERL_NIF_TERM> args = ErlUtil::getTupleCells(env, cells[1]);
+
+                    if(args.size() == 2) {
+
+                        unsigned int bufferSize        = ErlUtil::getValAsUint32(env, args[0]);
+                        std::string outputFile         = ErlUtil::getString(env, args[1]);
+
+                        nifutil::Profiler::initializeEventBuffer(bufferSize, outputFile);
+                        
+                        return eleveldb::ATOM_OK;
+                    }
+                }
             }
 
             //------------------------------------------------------------
