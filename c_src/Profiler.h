@@ -76,7 +76,7 @@ namespace nifutil {
             void add(uint64_t microSeconds, std::string flagName, bool on,
                      std::map<uint64_t, RingPartition>& ringMap);
 
-            void dump(std::map<uint64_t, RingPartition>& ringMap);
+            void dump(std::map<uint64_t, RingPartition>& ringMap, bool lock);
 
             void initialize(unsigned maxSize);
             
@@ -125,7 +125,9 @@ namespace nifutil {
         //------------------------------------------------------------
 
         static void addEvent(std::string flagName, bool on);
+        static void addEvent(uint64_t partPtr, bool on);
         static void setEventFileName(std::string fileName);
+        static void initializeEventBuffer(unsigned maxSize, std::string fileName);
         static void dumpEvents();
         
     private:
@@ -162,7 +164,8 @@ namespace nifutil {
         //------------------------------------------------------------
 
         EventBuffer eventBuffer_;
-
+        bool eventsInitialized_;
+        
         //------------------------------------------------------------
         // General members
         //------------------------------------------------------------

@@ -1480,15 +1480,40 @@ namespace eleveldb {
             }
 
             if(atom == "add_event") {
-                std::string eventName = ErlUtil::getAsString(env, cells[1]);
                 bool on = ErlUtil::getBool(env, cells[2]);
-                nifutil::Profiler::addEvent(eventName, on);
+
+                if(ErlUtil::isString(env, cells[1])) {
+                    std::string eventName = ErlUtil::getAsString(env, cells[1]);
+                    nifutil::Profiler::addEvent(eventName, on);
+                } else {
+                    uint64_t partPtr = ErlUtil::getValAsUint64(env, cells[1]);
+                    nifutil::Profiler::addEvent(partPtr, on);
+                }
+                
                 return eleveldb::ATOM_OK;
             }
 
             if(atom == "dump_events") {
                 nifutil::Profiler::dumpEvents();
                 return eleveldb::ATOM_OK;
+            }
+
+            if(atom == "init_event_buffer") {
+
+                if(ErlUtil::isTuple(env, cells[1])) {
+
+                    std::vector<ERL_NIF_TERM> args = ErlUtil::getTupleCells(env, cells[1]);
+
+                    if(args.size() == 2) {
+
+                        unsigned int bufferSize        = ErlUtil::getValAsUint32(env, args[0]);
+                        std::string outputFile         = ErlUtil::getString(env, args[1]);
+
+                        nifutil::Profiler::initializeEventBuffer(bufferSize, outputFile);
+                        
+                        return eleveldb::ATOM_OK;
+                    }
+                }
             }
 
             //------------------------------------------------------------

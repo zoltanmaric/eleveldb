@@ -114,12 +114,15 @@ void Profiler::EventBuffer::add(uint64_t microSeconds, std::string flagName, boo
     mutex_.Lock();
 
     events_[nextIndex_].setTo(microSeconds, flagName, on);
-    nextIndex_ = (nextIndex_ + 1) % maxSize_;
+    unsigned index = (nextIndex_ + 1) % maxSize_;
 
     // If this write just filled the buffer, dump it out and reset
-    
-    if(nextIndex_ == 0)
-        dump(ringMap);
+
+    if(index == 0) {
+        dump(ringMap, false);
+    } else {
+        nextIndex_ = index;
+    }
     
     mutex_.Unlock();
 }
@@ -127,9 +130,10 @@ void Profiler::EventBuffer::add(uint64_t microSeconds, std::string flagName, boo
 /**
 * Dump the event buffer and reset its indices
 */
-void Profiler::EventBuffer::dump(std::map<uint64_t, RingPartition>& ringMap)
+void Profiler::EventBuffer::dump(std::map<uint64_t, RingPartition>& ringMap, bool lock)
 {
-    mutex_.Lock();
+    if(lock)
+        mutex_.Lock();
         
     std::fstream outfile;
 
@@ -154,11 +158,12 @@ void Profiler::EventBuffer::dump(std::map<uint64_t, RingPartition>& ringMap)
 
     nextIndex_ = 0;
     outfile.close();
-    
-    mutex_.Unlock();
+
+    if(lock)
+        mutex_.Unlock();
 }
 
-std::ostream& operator<<(std::ostream& os, const Profiler::Event& event)
+std::ostream& nifutil::operator<<(std::ostream& os, const Profiler::Event& event)
 {
     os << event.microSeconds_ << " " << event.name_ << " " << (event.on_ ? 1 : 0);
     return os;
@@ -179,6 +184,8 @@ Profiler::Profiler()
     majorIntervalUs_      = 0;
     firstDump_            = true;
     countersInitialized_  = false;
+    eventsInitialized_    = false;
+    eventBuffer_.initialize(100);
     
     setPrefix("/tmp/");
 }
@@ -188,13 +195,21 @@ Profiler::Profiler()
  */
 Profiler::~Profiler() 
 {
+    // Dump out profiling info
+    
     std::ostringstream os;
     os << prefix_ << "/" << this << "_profile.txt";
     dump(os.str());
 
-    if(atomicCounterTimerId_ != 0) {
+    // Dump out any remaining buffered event information
+
+    if(eventsInitialized_)
+        eventBuffer_.dump(atomicCounterMap_, true);
+    
+    // Kill the thread that dumps out atomic counters
+    
+    if(atomicCounterTimerId_ != 0)
         pthread_kill(atomicCounterTimerId_, SIGKILL);
-    }
 }
 
 Profiler::Counter& Profiler::getCounter(std::string& label, bool perThread)
@@ -668,6 +683,28 @@ void Profiler::addEvent(std::string flagName, bool on)
     instance_.eventBuffer_.add(getCurrentMicroSeconds(), flagName, on, instance_.atomicCounterMap_);
 }
 
+void Profiler::addEvent(uint64_t partPtr, bool on)
+{
+    std::ostringstream os;
+    os << "partition" << instance_.atomicCounterMap_[partPtr].mapIndex_;
+    instance_.eventBuffer_.add(getCurrentMicroSeconds(), os.str(), on, instance_.atomicCounterMap_);
+}
+
+void Profiler::initializeEventBuffer(unsigned maxSize, std::string fileName)
+{
+    instance_.eventBuffer_.initialize(maxSize);
+    instance_.eventBuffer_.setFileName(fileName);
+
+    unsigned mapIndex = 0;
+    for(std::map<uint64_t, RingPartition>::iterator part = instance_.atomicCounterMap_.begin();
+        part != instance_.atomicCounterMap_.end(); part++) {
+        part->second.mapIndex_ = mapIndex;
+        ++mapIndex;
+    }
+
+    instance_.eventsInitialized_ = true;
+}
+
 void Profiler::setEventFileName(std::string fileName)
 {
     instance_.eventBuffer_.setFileName(fileName);
@@ -675,5 +712,5 @@ void Profiler::setEventFileName(std::string fileName)
 
 void Profiler::dumpEvents()
 {
-    instance_.eventBuffer_.dump(instance_.atomicCounterMap_);
+    instance_.eventBuffer_.dump(instance_.atomicCounterMap_, true);
 }
