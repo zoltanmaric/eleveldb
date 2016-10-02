@@ -1284,7 +1284,9 @@ namespace eleveldb {
         db_ptr.assign(ptr);
 
         // Write to the query counter for this partition
-    
+
+        FOUT("Passing DB ptr = " << ptr << " as start tag");
+        
         nifutil::Profiler::addEvent("query", (uint64_t)ptr, true);
 
         bool has_end_key = enif_is_binary(env, end_key_term);
@@ -1348,6 +1350,8 @@ namespace eleveldb {
 
         RangeScanTask* work_item = 0;
         try {
+            FOUT("Passing DB ptr = " << db_ptr.get() << " as RangeScan arg");
+
             work_item = new RangeScanTask(env, reply_ref, db_ptr.get(),
                                           start_key, end_key_ptr, opts, sync_handle->sync_obj_);
         } catch(std::runtime_error& err) {

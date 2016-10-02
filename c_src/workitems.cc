@@ -1145,7 +1145,9 @@ work_result RangeScanTask::DoWork()
 
     // Tag an end event for this query
     
-    nifutil::Profiler::addEvent("query", (uint64_t)(m_DbPtr->m_Db), false);
+//    nifutil::Profiler::addEvent("query", (uint64_t)(m_DbPtr->m_Db), false);
+    FOUT("Assigning DB ptr " << m_DbPtr.get() << " as end tag (m_DB = " << m_DbPtr->m_Db << ")");
+    nifutil::Profiler::addEvent("query", (uint64_t)(m_DbPtr.get()), false);
     
     enif_free_env(msg_env);
 
