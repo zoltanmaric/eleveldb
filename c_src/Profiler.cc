@@ -171,7 +171,7 @@ void Profiler::EventBuffer::dump(std::map<uint64_t, RingPartition>& ringMap, boo
 
 std::ostream& nifutil::operator<<(std::ostream& os, const Profiler::Event& event)
 {
-    os << event.microSeconds_ << " " << event.seqName_ << " " << event.flagName_ << (event.on_ ? 1 : 0);
+    os << event.microSeconds_ << " " << event.seqName_ << " " << event.flagName_ << " " << (event.on_ ? 1 : 0);
     return os;
 }
 
@@ -518,11 +518,9 @@ void Profiler::addRingPartition(uint64_t ptr, std::string leveldbFile)
 {
     instance_.mutex_.Lock();
 
-    if(!instance_.countersInitialized_) {
+    if(!instance_.countersInitialized_ && !instance_.eventsInitialized_) {
         gcp::util::String str(leveldbFile);
         gcp::util::String base = str.findNextInstanceOf("./data/leveldb/", true, " ", false);
-        
-        FOUT("About  to add counter with base = " << base);
         
         if(!base.isEmpty()) {
             instance_.atomicCounterMap_[ptr].leveldbFile_ = base.str();
@@ -688,7 +686,7 @@ void Profiler::addEvent(std::string seqName, std::string flagName, bool on)
 void Profiler::addEvent(std::string seqName, uint64_t partPtr, bool on)
 {
     std::ostringstream os;
-    os << "partition" << instance_.atomicCounterMap_[partPtr].mapIndex_;
+    os << "partition_" << instance_.atomicCounterMap_[partPtr].mapIndex_;
     instance_.eventBuffer_.add(getCurrentMicroSeconds(), seqName, os.str(), on, instance_.atomicCounterMap_);
 }
 
@@ -704,6 +702,8 @@ void Profiler::initializeEventBuffer(unsigned maxSize, std::string fileName)
         ++mapIndex;
     }
 
+    FOUT("INitialized event buffer to " << maxSize << " fileName = " << fileName << " ring map is = " << instance_.atomicCounterMap_.size());
+    
     instance_.eventsInitialized_ = true;
 }
 
