@@ -685,6 +685,8 @@ void Profiler::addEvent(std::string seqName, std::string flagName, bool on)
 
 void Profiler::addEvent(std::string seqName, uint64_t partPtr, bool on)
 {
+    FOUT("Inside addEvent with partPtr = " << partPtr << " on = " << on);
+    
     std::ostringstream os;
     os << "partition_" << instance_.atomicCounterMap_[partPtr].mapIndex_;
     instance_.eventBuffer_.add(getCurrentMicroSeconds(), seqName, os.str(), on, instance_.atomicCounterMap_);
