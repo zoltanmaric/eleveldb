@@ -1,8 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%%  eleveldb: Erlang Wrapper for LevelDB (http://code.google.com/p/leveldb/)
-%%
-%% Copyright (c) 2010-2012 Basho Technologies, Inc. All Rights Reserved.
+%% Copyright (c) 2010-2016 Basho Technologies, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -19,6 +17,9 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
+%%
+%% Erlang NIF wrapper for LevelDB
+%%
 -module(eleveldb).
 
 -export([open/2,
@@ -46,7 +47,7 @@
 -export_type([db_ref/0,
               itr_ref/0]).
 
--on_load(init/0).
+-on_load(init_nif_lib/0).
 
 -ifdef(TEST).
 -compile(export_all).
@@ -58,6 +59,10 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+%% How many previous OTP releases to try if we don't find a NIF library built
+%% with the current version.
+-define(OTP_PREV_RELS,  2).
+
 %% This cannot be a separate function. Code must be inline to trigger
 %% Erlang compiler's use of optimized selective receive.
 -define(WAIT_FOR_REPLY(Ref),
@@ -65,21 +70,12 @@
                 Reply
         end).
 
--spec init() -> ok | {error, any()}.
-init() ->
-    SoName = case code:priv_dir(?MODULE) of
-                 {error, bad_name} ->
-                     case code:which(?MODULE) of
-                         Filename when is_list(Filename) ->
-                             filename:join([filename:dirname(Filename),"../priv", "eleveldb"]);
-                         _ ->
-                             filename:join("../priv", "eleveldb")
-                     end;
-                 Dir ->
-                     filename:join(Dir, "eleveldb")
-             end,
-    erlang:load_nif(SoName, application:get_all_env(eleveldb)).
+-define(COMPRESSION_ENUM, [snappy, lz4, false]).
 
+-type init_error() :: {atom(), string()}.
+-type init_result() :: ok | {error, init_error() | [init_error()]}.
+
+-type compression_algorithm() :: snappy | lz4 | false.
 -type open_options() :: [{create_if_missing, boolean()} |
                          {error_if_exists, boolean()} |
                          {write_buffer_size, pos_integer()} |
@@ -89,7 +85,7 @@ init() ->
                          {block_size_steps, pos_integer()} |
                          {paranoid_checks, boolean()} |
                          {verify_compactions, boolean()} |
-                         {compression, boolean()} |
+                         {compression, [compression_algorithm()]} |
                          {use_bloomfilter, boolean() | pos_integer()} |
                          {total_memory, pos_integer()} |
                          {total_leveldb_mem, pos_integer()} |
@@ -103,7 +99,11 @@ init() ->
                          {tiered_slow_level, pos_integer()} |
                          {tiered_fast_prefix, string()} |
                          {tiered_slow_prefix, string()} |
-                         {cache_object_warming, boolean()}].
+                         {cache_object_warming, boolean()} |
+                         {expiry_enabled, boolean()} |
+                         {expiry_minutes, pos_integer()} |
+                         {whole_file_expiry, boolean()}
+                        ].
 
 -type read_option() :: {verify_checksums, boolean()} |
                        {fill_cache, boolean()} |
@@ -282,7 +282,7 @@ is_empty(Ref) ->
 is_empty_int(_Ref) ->
     erlang:nif_error({error, not_loaded}).
 
--spec option_types(open | read | write) -> [{atom(), bool | integer | any}].
+-spec option_types(open | read | write) -> [{atom(), bool | integer | [compression_algorithm()] | any}].
 option_types(open) ->
     [{create_if_missing, bool},
      {error_if_exists, bool},
@@ -293,7 +293,7 @@ option_types(open) ->
      {block_size_steps, integer},
      {paranoid_checks, bool},
      {verify_compactions, bool},
-     {compression, bool},
+     {compression, ?COMPRESSION_ENUM},
      {use_bloomfilter, any},
      {total_memory, integer},
      {total_leveldb_mem, integer},
@@ -307,7 +307,10 @@ option_types(open) ->
      {tiered_slow_level, integer},
      {tiered_fast_prefix, any},
      {tiered_slow_prefix, any},
-     {cache_object_warming, bool}];
+     {cache_object_warming, bool},
+     {expiry_enabled, bool},
+     {expiry_minutes, integer},
+     {whole_file_expiry, bool}];
 
 option_types(read) ->
     [{verify_checksums, bool},
@@ -324,7 +327,6 @@ validate_options(Type, Opts) ->
                             KType = lists:keyfind(K, 1, Types),
                             validate_type(KType, V)
                     end, Opts).
-
 
 
 %% ===================================================================
@@ -378,7 +380,66 @@ validate_type({_Key, bool}, true)                            -> true;
 validate_type({_Key, bool}, false)                           -> true;
 validate_type({_Key, integer}, Value) when is_integer(Value) -> true;
 validate_type({_Key, any}, _Value)                           -> true;
+validate_type({_Key, ?COMPRESSION_ENUM}, snappy)             -> true;
+validate_type({_Key, ?COMPRESSION_ENUM}, lz4)                -> true;
+validate_type({_Key, ?COMPRESSION_ENUM}, false)              -> true;
 validate_type(_, _)                                          -> false.
+
+
+%% ===================================================================
+%% NIF initialization
+%% ===================================================================
+
+-spec init_nif_lib() -> init_result().
+%% Called once at module load.
+init_nif_lib() ->
+    SoDir = case code:priv_dir(?MODULE) of
+        {error, bad_name} ->
+            case code:which(?MODULE) of
+                Filename when is_list(Filename) ->
+                    filename:join(filename:dirname(Filename), "../priv");
+                _ ->
+                    "../priv"
+            end;
+        Dir ->
+            Dir
+    end,
+    {_, Sys} = os:type(),
+    Arch = erlang:hd(string:tokens(erlang:system_info(system_architecture), "-")),
+    Rel = case erlang:system_info(otp_release) of
+        [$R | Rev] ->
+            Rev;
+        Rev ->
+            Rev
+    end,
+    % start at the current version, work backward to find a NIF library
+    {Otp, _} = string:to_integer(Rel),
+    AppEnv = application:get_all_env(eleveldb),
+    Prefix = io_lib:format("~s/eleveldb_~s_~s_otp", [SoDir, Sys, Arch]),
+    init_nif_lib(
+        lists:seq(Otp, (Otp - ?OTP_PREV_RELS), -1), Prefix, AppEnv, []).
+
+-spec init_nif_lib(
+        Vers    :: [pos_integer()],
+        Prefix  :: string(),
+        AppEnv  :: [{atom(), term()}],
+        Errors  :: [init_error()] ) -> init_result().
+%% Called for each OTP candidate release in descending order until a NIF
+%% library built with that release is found and successfully loaded.
+init_nif_lib([Ver | Vers], Prefix, AppEnv, Errors) ->
+    SoName = lists:flatten(Prefix, erlang:integer_to_list(Ver)),
+    case erlang:load_nif(SoName, AppEnv) of
+        ok ->
+            ok;
+        {error, {old_code, _}} = Fatal ->
+            Fatal;
+        {error, Error} ->
+            init_nif_lib(Vers, Prefix, AppEnv, Errors ++ [Error])
+    end;
+init_nif_lib([], _, _, [Error]) ->
+    {error, Error};
+init_nif_lib([], _, _, Errors) ->
+    {error, Errors}.
 
 
 %% ===================================================================
@@ -549,6 +610,6 @@ prop_put_delete_test_() ->
     [{timeout, 3*Timeout1, {"No ?ALWAYS()", fun() -> qc(eqc:testing_time(Timeout1,prop_put_delete())) end}},
      {timeout, 10*Timeout2, {"With ?ALWAYS()", fun() -> qc(eqc:testing_time(Timeout2,?ALWAYS(150,prop_put_delete()))) end}}].
 
--endif.
+-endif. % EQC
 
--endif.
+-endif. % TEST

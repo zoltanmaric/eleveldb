@@ -56,9 +56,9 @@ RefObject::~RefObject()
  */
 
 ErlRefObject::ErlRefObject()
-    : m_ErlangThisPtr(NULL), m_CloseRequested(0),
+    : m_ErlangThisPtr(NULL),
       m_CloseMutex(true), // true => creates a mutex that can be locked recursively
-      m_CloseCond(&m_CloseMutex)
+      m_CloseCond(&m_CloseMutex), m_CloseRequested(0)
 {
 }   // ErlRefObject::ErlRefObject
 
@@ -105,7 +105,7 @@ ErlRefObject::InitiateCloseRequest()
 
         // one ref from construction, one ref from broadcast in RefDec below
         //  (only wait if RefDec has not signaled)
-        if (1<m_RefCount && 1==m_CloseRequested)
+        if (1<GetRefCount() && 1==GetCloseRequested())
         {
             m_CloseCond.Wait();
         }
@@ -127,9 +127,9 @@ ErlRefObject::RefDec()
     {
         leveldb::MutexLock lock(&m_CloseMutex);
 
-        cur_count=leveldb::dec_and_fetch(&m_RefCount);
+        cur_count=RefObject::RefDecNoDelete();
 
-        if (cur_count<2 && 1==m_CloseRequested)
+        if (cur_count<2 && 1==GetCloseRequested())
         {
             bool flag;
 
@@ -137,7 +137,7 @@ ErlRefObject::RefDec()
             m_CloseRequested=2;
 
             // is there really more than one ref count now?
-            flag=(0<m_RefCount);
+            flag=(0<GetRefCount());
             if (flag)
             {
                 RefObject::RefInc();
@@ -148,7 +148,7 @@ ErlRefObject::RefDec()
             //  that the mutex unlock is called on all threads
             //  before destruction.
             if (flag)
-                RefObject::RefDec();
+                RefObject::RefDecNoDelete();
             else
                 cur_count=0;
         }   // if
@@ -156,13 +156,16 @@ ErlRefObject::RefDec()
 
     if (0==cur_count)
     {
-        assert(0!=m_CloseRequested);
+        // the following assert is a mining canary for double
+        //  delete of object.  Seen twice since 2013.  Likely
+        //  due to second RefDecNoDelete() call above having been RefDec()
+        assert(0!=GetCloseRequested());
         delete this;
     }   // if
 
     return(cur_count);
 
-}   // DbObject::RefDec
+}   // ErlRefObject::RefDec
 
 
 /**
@@ -237,7 +240,7 @@ DbObject::RetrieveDbObject(
         if (NULL!=ret_ptr)
         {
             // has close been requested?
-            if (0!=ret_ptr->m_CloseRequested)
+            if (0!=ret_ptr->GetCloseRequested())
             {
                 // object already closing
                 ret_ptr=NULL;
@@ -337,7 +340,9 @@ DbObject::Shutdown()
             // follow protocol, only one thread calls Initiate
 //            if (leveldb::compare_and_swap(itr_ptr->m_ErlangThisPtr, itr_ptr, (ItrObject *)NULL))
             if (itr_ptr->ClaimCloseFromCThread())
+            {
                 itr_ptr->ItrObject::InitiateCloseRequest();
+            }   // if
         }   // if
     } while(again);
 
@@ -353,7 +358,7 @@ DbObject::AddReference(
     bool ret_flag;
     leveldb::MutexLock lock(&m_ItrMutex);
 
-    ret_flag=(0==m_CloseRequested);
+    ret_flag=(0==GetCloseRequested());
 
     if (ret_flag)
         m_ItrList.push_back(ItrPtr);
@@ -382,24 +387,23 @@ DbObject::RemoveReference(
  */
 
 LevelIteratorWrapper::LevelIteratorWrapper(
-    ItrObject * ItrPtr,
-    bool KeysOnly,
-    leveldb::ReadOptions & Options,
-    ERL_NIF_TERM itr_ref)
-    : m_DbPtr(ItrPtr->m_DbPtr.get()), m_ItrPtr(ItrPtr), m_Snapshot(NULL), m_Iterator(NULL),
-      m_HandoffAtomic(0), m_KeysOnly(KeysOnly), m_PrefetchStarted(false),
-      m_Options(Options), itr_ref(itr_ref),
-      m_IteratorStale(0), m_StillUse(true)
+    DbObjectPtr_t & DbPtr,                  //!< db access for local iterator rebuild
+    leveldb::ReadOptions & Options)         //!< options to use in iterator rebuild
+    : m_DbPtr(DbPtr), m_Options(Options),
+      m_Snapshot(NULL), m_Iterator(NULL),
+      m_HandoffAtomic(0), m_PrefetchStarted(false),
+      m_IteratorStale(0), m_StillUse(true),
+      m_IsValid(false)
 {
-    RebuildIterator();
-};
 
+    RebuildIterator();
+
+}   // LevelIteratorWrapper::LevelIteratorWrapper
 
 
 /**
  * Iterator management object (Erlang memory)
  */
-
 ErlNifResourceType * ItrObject::m_Itr_RESOURCE(NULL);
 
 
@@ -420,18 +424,21 @@ ItrObject::CreateItrObjectType(
 
 void *
 ItrObject::CreateItrObject(
-    DbObject * DbPtr,
+    DbObjectPtr_t & DbPtr,
     bool KeysOnly,
     leveldb::ReadOptions & Options)
 {
+    ItrObjErlang * erl_ptr;
     ItrObject * ret_ptr;
     void * alloc_ptr;
 
     // the alloc call initializes the reference count to "one"
-    alloc_ptr=enif_alloc_resource(m_Itr_RESOURCE, sizeof(ItrObject *));
+    alloc_ptr=enif_alloc_resource(m_Itr_RESOURCE, sizeof(ItrObjErlang));
+    erl_ptr=(ItrObjErlang *)alloc_ptr;
 
     ret_ptr=new ItrObject(DbPtr, KeysOnly, Options);
-    *(ItrObject **)alloc_ptr=ret_ptr;
+    erl_ptr->m_ItrPtr=ret_ptr;
+    erl_ptr->m_SpinLock=0;
 
     // manual reference increase to keep active until "eleveldb_iterator_close" called
     ret_ptr->RefInc();
@@ -445,25 +452,41 @@ ItrObject::CreateItrObject(
 ItrObject *
 ItrObject::RetrieveItrObject(
     ErlNifEnv * Env,
-    const ERL_NIF_TERM & ItrTerm, bool ItrClosing)
+    const ERL_NIF_TERM & ItrTerm,
+    bool ItrClosing,
+    ItrObjectPtr_t & counted_ptr)
 {
-    ItrObject ** itr_ptr_ptr, * ret_ptr;
+    ItrObjErlang * erl_ptr;
+    ItrObject * ret_ptr;
 
     ret_ptr=NULL;
 
-    if (enif_get_resource(Env, ItrTerm, m_Itr_RESOURCE, (void **)&itr_ptr_ptr))
+    if (enif_get_resource(Env, ItrTerm, m_Itr_RESOURCE, (void **)&erl_ptr))
     {
-        ret_ptr=*itr_ptr_ptr;
+        ret_ptr=erl_ptr->m_ItrPtr;
 
+        // only continue if close sequence not started
         if (NULL!=ret_ptr)
         {
+            // need to use "const int" instead of literals for
+            //  solaris and smartos compare_and_swap to compile
+            const int zero(0), one(1);
+            // lock access ... spin
+            while(!leveldb::compare_and_swap(&erl_ptr->m_SpinLock, zero, one)) ;
+
             // has close been requested?
-            if (ret_ptr->m_CloseRequested
-                || (!ItrClosing && ret_ptr->m_DbPtr->m_CloseRequested))
+            if (ret_ptr->GetCloseRequested()
+                || (!ItrClosing && ret_ptr->m_DbPtr->GetCloseRequested()))
             {
                 // object already closing
                 ret_ptr=NULL;
             }   // if
+
+            // set during spin lock
+            counted_ptr.assign(ret_ptr);
+
+            // use cas for memory fencing, we own the lock
+            leveldb::compare_and_swap(&erl_ptr->m_SpinLock, one, zero);
         }   // if
     }   // if
 
@@ -477,16 +500,18 @@ ItrObject::ItrObjectResourceCleanup(
     ErlNifEnv * Env,
     void * Arg)
 {
-    ItrObject * volatile * erl_ptr;
+
+    ItrObjErlang * erl_ptr;
     ItrObject * itr_ptr;
 
-    erl_ptr=(ItrObject * volatile *)Arg;
-    itr_ptr=*erl_ptr;
+    erl_ptr=(ItrObjErlang *)Arg;
+    itr_ptr=erl_ptr->m_ItrPtr;
 
     // is Erlang first to initiate close?
-    if (leveldb::compare_and_swap(erl_ptr, itr_ptr, (ItrObject *)NULL)
+    if (leveldb::compare_and_swap(&erl_ptr->m_ItrPtr, itr_ptr, (ItrObject *)NULL)
         && NULL!=itr_ptr)
     {
+        leveldb::gPerfCounters->Inc(leveldb::ePerfDebug3);
         itr_ptr->InitiateCloseRequest();
     }   // if
 
@@ -496,13 +521,15 @@ ItrObject::ItrObjectResourceCleanup(
 
 
 ItrObject::ItrObject(
-    DbObject * DbPtr,
+    DbObjectPtr_t & DbPtr,
     bool KeysOnly,
     leveldb::ReadOptions & Options)
-    : keys_only(KeysOnly), m_ReadOptions(Options), reuse_move(NULL),
+    : keys_only(KeysOnly), m_ReadOptions(Options),
+      m_Wrap(DbPtr, m_ReadOptions),
+      reuse_move(NULL),
       m_DbPtr(DbPtr), itr_ref_env(NULL)
 {
-    if (NULL!=DbPtr)
+    if (NULL!=DbPtr.get())
         DbPtr->AddReference(this);
 
 }   // ItrObject::ItrObject
@@ -530,6 +557,37 @@ ItrObject::~ItrObject()
 }   // ItrObject::~ItrObject
 
 
+/**
+ * matthewv - This is a hack to compensate for Riak AAE
+ *   having two active processes using the same iterator.
+ *   One process attempts a close while the other iterates along.
+ *   This is to help the close succeed.  (October 2016)
+ */
+uint32_t
+ItrObject::RefDec()
+{
+    uint32_t cur_count;
+
+    // Race condition:
+    //  Thread trying to close gets into InitiateCloseRequest() and
+    //   finishes call to Shutdown().  Thread iterating gets far enough
+    //   into async_iterator_move() to not see GetCloseRequest() set, but
+    //   is able to create a new MoveItem within reuse_move.
+    //  This hack knows that async_iterator_move() uses ItrObjectPtr_t that
+    //   holds "this" until the end of the function.  ItrObjectPtr_t will
+    //   call RefDec in its destructor.  Gives a chance to cleanup a tad.
+    if (1==GetCloseRequested())
+        ReleaseReuseMove();
+
+    // WARNING:  the following call could delete this object.
+    //           make no references to object members afterward
+    cur_count=ErlRefObject::RefDec();
+
+    return(cur_count);
+
+}   // ItrObject::RefDec
+
+
 void
 ItrObject::Shutdown()
 {
@@ -537,9 +595,6 @@ ItrObject::Shutdown()
     //  (reuse_move holds a counter to this object, which will
     //   release when move object destructs)
     ReleaseReuseMove();
-
-    // ItrObject and m_Iter each hold pointers to other, release ours
-    m_Iter.assign(NULL);
 
     return;
 

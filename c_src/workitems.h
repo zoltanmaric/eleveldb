@@ -69,7 +69,7 @@ class WorkTask : public leveldb::ThreadTask
  public:
     WorkTask(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref);
 
-    WorkTask(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref, DbObject * DbPtr);
+    WorkTask(ErlNifEnv *caller_env, ERL_NIF_TERM& caller_ref, DbObjectPtr_t & DbPtr);
 
     virtual ~WorkTask();
 
@@ -132,32 +132,23 @@ class WriteTask : public WorkTask
 {
 protected:
     leveldb::WriteBatch*    batch;
-    leveldb::WriteOptions*          options;
+    leveldb::WriteOptions*  options;
 
 public:
-
     WriteTask(ErlNifEnv* _owner_env, ERL_NIF_TERM _caller_ref,
-                DbObject * _db_handle,
+                DbObjectPtr_t & _db_handle,
                 leveldb::WriteBatch* _batch,
-                leveldb::WriteOptions* _options)
-        : WorkTask(_owner_env, _caller_ref, _db_handle),
-       batch(_batch),
-       options(_options)
-    {}
+              leveldb::WriteOptions* _options);
 
-    virtual ~WriteTask()
-    {
-        delete batch;
-        delete options;
-    }
+    virtual ~WriteTask();
 
 protected:
-    virtual work_result DoWork()
-    {
-        leveldb::Status status = m_DbPtr->m_Db->Write(*options, batch);
+    virtual work_result DoWork();
 
-        return (status.ok() ? work_result(ATOM_OK) : work_result(local_env(), ATOM_ERROR_DB_WRITE, status));
-    }
+private:
+    WriteTask();
+    WriteTask(const WriteTask &);
+    WriteTask & operator=(const WriteTask &);
 
 };  // class WriteTask
 
@@ -207,36 +198,13 @@ protected:
 public:
     GetTask(ErlNifEnv *_caller_env,
             ERL_NIF_TERM _caller_ref,
-            DbObject *_db_handle,
+            DbObjectPtr_t & _db_handle,
             ERL_NIF_TERM _key_term,
-            leveldb::ReadOptions &_options)
-        : WorkTask(_caller_env, _caller_ref, _db_handle),
-        options(_options)
-        {
-            ErlNifBinary key;
+            leveldb::ReadOptions &_options);
 
-            enif_inspect_binary(_caller_env, _key_term, &key);
-            m_Key.assign((const char *)key.data, key.size);
-        }
+    virtual ~GetTask();
 
-    virtual ~GetTask()
-    {
-    }
-
-protected:
-    virtual work_result DoWork()
-    {
-        ERL_NIF_TERM value_bin;
-        BinaryValue value(local_env(), value_bin);
-        leveldb::Slice key_slice(m_Key);
-
-        leveldb::Status status = m_DbPtr->m_Db->Get(options, key_slice, &value);
-
-        if(!status.ok())
-            return work_result(ATOM_NOT_FOUND);
-
-        return work_result(local_env(), ATOM_OK, value_bin);
-    }
+    virtual work_result DoWork();
 
 };  // class GetTask
 
@@ -256,41 +224,13 @@ protected:
 public:
     IterTask(ErlNifEnv *_caller_env,
              ERL_NIF_TERM _caller_ref,
-             DbObject *_db_handle,
+             DbObjectPtr_t & _db_handle,
              const bool _keys_only,
-             leveldb::ReadOptions &_options)
-        : WorkTask(_caller_env, _caller_ref, _db_handle),
-        keys_only(_keys_only), options(_options)
-    {}
+             leveldb::ReadOptions &_options);
 
-    virtual ~IterTask()
-    {
-    }
+    virtual ~IterTask();
 
-protected:
-    virtual work_result DoWork()
-    {
-        ItrObject * itr_ptr;
-        void * itr_ptr_ptr;
-
-        // NOTE: transfering ownership of options to ItrObject
-        itr_ptr_ptr=ItrObject::CreateItrObject(m_DbPtr.get(), keys_only, options);
-
-        // Copy caller_ref to reuse in future iterator_move calls
-        itr_ptr=*(ItrObject**)itr_ptr_ptr;
-        itr_ptr->itr_ref_env = enif_alloc_env();
-        itr_ptr->itr_ref = enif_make_copy(itr_ptr->itr_ref_env, caller_ref());
-
-        itr_ptr->m_Iter.assign(new LevelIteratorWrapper(itr_ptr, keys_only,
-                                                        options, itr_ptr->itr_ref));
-
-        ERL_NIF_TERM result = enif_make_resource(local_env(), itr_ptr_ptr);
-
-        // release reference created during CreateItrObject()
-        enif_release_resource(itr_ptr_ptr);
-
-        return work_result(local_env(), ATOM_OK, result);
-    }
+    virtual work_result DoWork();
 
 };  // class IterTask
 
@@ -301,7 +241,7 @@ public:
     typedef enum { FIRST, LAST, NEXT, PREV, SEEK, PREFETCH, PREFETCH_STOP } action_t;
 
 protected:
-    ReferencePtr<LevelIteratorWrapper> m_ItrWrap;             //!< access to database, and holds reference
+    ItrObjectPtr_t m_Itr;
 
 public:
     action_t                                       action;
@@ -311,28 +251,14 @@ public:
 
     // No seek target:
     MoveTask(ErlNifEnv *_caller_env, ERL_NIF_TERM _caller_ref,
-             LevelIteratorWrapper * IterWrap, action_t& _action)
-        : WorkTask(NULL, _caller_ref, IterWrap->m_DbPtr.get()),
-        m_ItrWrap(IterWrap), action(_action)
-    {
-        // special case construction
-        local_env_=NULL;
-        enif_self(_caller_env, &local_pid);
-    }
+             ItrObjectPtr_t & Iter, action_t& _action);
 
     // With seek target:
     MoveTask(ErlNifEnv *_caller_env, ERL_NIF_TERM _caller_ref,
-             LevelIteratorWrapper * IterWrap, action_t& _action,
-             std::string& _seek_target)
-        : WorkTask(NULL, _caller_ref, IterWrap->m_DbPtr.get()),
-        m_ItrWrap(IterWrap), action(_action),
-        seek_target(_seek_target)
-        {
-            // special case construction
-            local_env_=NULL;
-            enif_self(_caller_env, &local_pid);
-        }
-    virtual ~MoveTask() {};
+             ItrObjectPtr_t & Iter, action_t& _action,
+             std::string& _seek_target);
+
+    virtual ~MoveTask();
 
     virtual ErlNifEnv *local_env();
 
@@ -355,38 +281,11 @@ protected:
 public:
 
     CloseTask(ErlNifEnv* _owner_env, ERL_NIF_TERM _caller_ref,
-              DbObject * _db_handle)
-        : WorkTask(_owner_env, _caller_ref, _db_handle)
-    {}
+              DbObjectPtr_t & _db_handle);
 
-    virtual ~CloseTask()
-    {
-    }
+    virtual ~CloseTask();
 
-protected:
-    virtual work_result DoWork()
-    {
-        DbObject * db_ptr;
-
-        // get db pointer then clear reference count to it
-        db_ptr=m_DbPtr.get();
-        m_DbPtr.assign(NULL);
-
-        if (NULL!=db_ptr)
-        {
-            // set closing flag, this is blocking
-            db_ptr->InitiateCloseRequest();
-
-            // db_ptr no longer valid
-            db_ptr=NULL;
-
-            return(work_result(ATOM_OK));
-        }   // if
-        else
-        {
-            return work_result(local_env(), ATOM_ERROR, ATOM_BADARG);
-        }   // else
-    }
+    virtual work_result DoWork();
 
 };  // class CloseTask
 
@@ -401,41 +300,12 @@ protected:
     ReferencePtr<ItrObject> m_ItrPtr;
 
 public:
-
     ItrCloseTask(ErlNifEnv* _owner_env, ERL_NIF_TERM _caller_ref,
-              ItrObject * _itr_handle)
-        : WorkTask(_owner_env, _caller_ref),
-        m_ItrPtr(_itr_handle)
-    {}
+              ItrObjectPtr_t & _itr_handle);
 
-    virtual ~ItrCloseTask()
-    {
-    }
+    virtual ~ItrCloseTask();
 
-protected:
-    virtual work_result DoWork()
-    {
-        ItrObject * itr_ptr;
-
-        // get iterator pointer then clear reference count to it
-        itr_ptr=m_ItrPtr.get();
-        m_ItrPtr.assign(NULL);
-
-        if (NULL!=itr_ptr)
-        {
-            // set closing flag, this is blocking
-            itr_ptr->InitiateCloseRequest();
-
-            // itr_ptr no longer valid
-            itr_ptr=NULL;
-
-            return(work_result(ATOM_OK));
-        }   // if
-        else
-        {
-            return work_result(local_env(), ATOM_ERROR, ATOM_BADARG);
-        }   // else
-    }
+    virtual work_result DoWork();
 
 };  // class ItrCloseTask
 

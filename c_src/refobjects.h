@@ -46,8 +46,9 @@ namespace eleveldb {
 
 /**
  * Base class for any object that offers RefInc / RefDec interface
+ *  Today the class' sole purpose is to provide eleveldb specific
+ *  performance counters.
  */
-
 class RefObject : public leveldb::RefObjectBase
 {
 public:
@@ -73,16 +74,15 @@ public:
     //  owns the shutdown (Erlang or async C)
     void * volatile * m_ErlangThisPtr;
 
+    leveldb::port::Mutex   m_CloseMutex;        //!< for condition wait
+    leveldb::port::CondVar m_CloseCond;         //!< for notification of user's finish
+
+private:  // private to force use of GetCloseRequest()
+    // m_CloseRequested assumes m_CloseMutex held for writes
     // 1 once InitiateCloseRequest starts,
     // 2 other pointers to "this" released
     // 3 final RefDec and destructor executing
     volatile uint32_t m_CloseRequested;
-
-    leveldb::port::Mutex   m_CloseMutex;        //!< for condition wait
-    leveldb::port::CondVar m_CloseCond;         //!< for notification of user's finish
-
-protected:
-
 
 public:
     ErlRefObject();
@@ -96,6 +96,10 @@ public:
     bool ClaimCloseFromCThread();
 
     void InitiateCloseRequest();
+
+    // memory fencing for reads
+    uint32_t GetCloseRequested()
+        {return(leveldb::add_and_fetch(&m_CloseRequested, (uint32_t)0));};
 
 private:
     ErlRefObject(const ErlRefObject&);              // nocopy
@@ -119,7 +123,7 @@ public:
         : t(NULL)
     {};
 
-    ReferencePtr(TargetT *_t)
+    explicit ReferencePtr(TargetT *_t)
         : t(_t)
     {
         if (NULL!=t)
@@ -131,8 +135,10 @@ public:
 
     ~ReferencePtr()
     {
-        if (NULL!=t)
-            t->RefDec();
+        TargetT * temp_ptr(t);
+        t=NULL;
+        if (NULL!=temp_ptr)
+            temp_ptr->RefDec();
     }
 
     void assign(TargetT * _t)
@@ -201,35 +207,42 @@ private:
     DbObject& operator=(const DbObject&);   // nocopyassign
 };  // class DbObject
 
+typedef ReferencePtr<class DbObject> DbObjectPtr_t;
+
 
 /**
  * A self deleting wrapper to contain leveldb iterator.
  *   Used when an ItrObject needs to skip around and might
  *   have a background MoveItem performing a prefetch on existing
  *   iterator.
+ *
+ *   Oct 17, 2016:  new usage model does not require the Wrapper
+ *   be replaced for reuse after Seeks.  Converting to static object
  */
 
-class LevelIteratorWrapper : public RefObject
+class LevelIteratorWrapper
 {
 public:
-    ReferencePtr<DbObject> m_DbPtr;           //!< need to keep db open for delete of this object
-    ReferencePtr<class ItrObject> m_ItrPtr;         //!< shared itr_ref requires we hold ItrObject
+    DbObjectPtr_t m_DbPtr;                    //!< access to db for iterator rebuild
+    leveldb::ReadOptions & m_Options;         //!< ItrObject's ReadOptions struct
+                                              //     (updates "snapshot" member
+
     const leveldb::Snapshot * m_Snapshot;
     leveldb::Iterator * m_Iterator;
     volatile uint32_t m_HandoffAtomic;        //!< matthew's atomic foreground/background prefetch flag.
-    bool m_KeysOnly;                          //!< only return key values
+
     // m_PrefetchStarted must use uint32_t instead of bool for Solaris CAS operations
     volatile uint32_t m_PrefetchStarted;          //!< true after first prefetch command
-    leveldb::ReadOptions m_Options;           //!< local copy of ItrObject::options
-    ERL_NIF_TERM itr_ref;                     //!< shared copy of ItrObject::itr_ref
 
     // only used if m_Options.iterator_refresh == true
     std::string m_RecentKey;                  //!< Most recent key returned
     time_t m_IteratorStale;                   //!< time iterator should refresh
     bool m_StillUse;                          //!< true if no error or key end seen
 
-    LevelIteratorWrapper(ItrObject * ItrPtr, bool KeysOnly,
-                         leveldb::ReadOptions & Options, ERL_NIF_TERM itr_ref);
+    // read by Erlang thread, maintained by eleveldb MoveItem::DoWork
+    volatile bool m_IsValid;                  //!< iterator state after last operation
+
+    LevelIteratorWrapper(DbObjectPtr_t & DbPtr, leveldb::ReadOptions & Options);
 
     virtual ~LevelIteratorWrapper()
     {
@@ -237,9 +250,12 @@ public:
     }   // ~LevelIteratorWrapper
 
     leveldb::Iterator * get() {return(m_Iterator);};
-    leveldb::Iterator * operator->() {return(m_Iterator);};
 
-    bool Valid() {return(NULL!=m_Iterator && m_Iterator->Valid());};
+    volatile bool Valid() {return(m_IsValid);};
+    void SetValid(bool flag) {m_IsValid=flag;};
+
+    // warning, only valid with Valid() otherwise potential
+    //   segfault if iterator purged to fix AAE'ism
     leveldb::Slice key() {return(m_Iterator->key());};
     leveldb::Slice value() {return(m_Iterator->value());};
 
@@ -248,15 +264,19 @@ public:
     {
         if (NULL!=m_Snapshot)
         {
-            // leveldb performs actual "delete" call on m_Shapshot's pointer
-            m_DbPtr->m_Db->ReleaseSnapshot(m_Snapshot);
+            const leveldb::Snapshot * temp_snap(m_Snapshot);
+
             m_Snapshot=NULL;
+            // leveldb performs actual "delete" call on m_Shapshot's pointer
+            m_DbPtr->m_Db->ReleaseSnapshot(temp_snap);
         }   // if
 
         if (NULL!=m_Iterator)
         {
-            delete m_Iterator;
+            leveldb::Iterator * temp_iter(m_Iterator);
+
             m_Iterator=NULL;
+            delete temp_iter;
         }   // if
     }   // PurgeIterator
 
@@ -279,6 +299,7 @@ private:
 
 };  // LevelIteratorWrapper
 
+typedef ReferencePtr<LevelIteratorWrapper> LevelIteratorWrapperPtr_t;
 
 
 /**
@@ -287,10 +308,9 @@ private:
 class ItrObject : public ErlRefObject
 {
 public:
-    ReferencePtr<LevelIteratorWrapper> m_Iter;
-
     bool keys_only;
     leveldb::ReadOptions m_ReadOptions; //!< local copy, pass to LevelIteratorWrapper only
+    LevelIteratorWrapper m_Wrap;
 
     volatile class MoveTask * reuse_move;  //!< iterator work object that is reused instead of lots malloc/free
 
@@ -304,18 +324,21 @@ protected:
     static ErlNifResourceType* m_Itr_RESOURCE;
 
 public:
-    ItrObject(DbObject *, bool, leveldb::ReadOptions &);
+    ItrObject(DbObjectPtr_t &, bool, leveldb::ReadOptions &);
 
     virtual ~ItrObject(); // needs to perform free_itr
+
+    virtual uint32_t RefDec();
 
     virtual void Shutdown();
 
     static void CreateItrObjectType(ErlNifEnv * Env);
 
-    static void * CreateItrObject(DbObject * Db, bool KeysOnly, leveldb::ReadOptions & Options);
+    static void * CreateItrObject(DbObjectPtr_t & Db, bool KeysOnly, leveldb::ReadOptions & Options);
 
     static ItrObject * RetrieveItrObject(ErlNifEnv * Env, const ERL_NIF_TERM & DbTerm,
-                                         bool ItrClosing=false);
+                                         bool ItrClosing,
+                                         ReferencePtr<class ItrObject> & CountedPtr);
 
     static void ItrObjectResourceCleanup(ErlNifEnv *Env, void * Arg);
 
@@ -327,6 +350,21 @@ private:
     ItrObject & operator=(const ItrObject &); // no assignment
 
 };  // class ItrObject
+
+
+typedef ReferencePtr<class ItrObject> ItrObjectPtr_t;
+
+
+/**
+ * Container stored in Erlang heap.  Used
+ *  to allow erlang heap to destroy iterator if process(s) holding
+ *  iterator go away.
+ */
+struct ItrObjErlang
+{
+    ItrObject * m_ItrPtr;
+    volatile uint32_t m_SpinLock;
+};
 
 } // namespace eleveldb
 

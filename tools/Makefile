@@ -1,6 +1,6 @@
 # -------------------------------------------------------------------
 #
-# Copyright (c) 2011-2016 Basho Technologies, Inc.
+# Copyright (c) 2011-2017 Basho Technologies, Inc.
 #
 # This file is provided to you under the Apache License,
 # Version 2.0 (the "License"); you may not use this file
@@ -31,19 +31,31 @@ cache_dir := $(prj_dir)/.cache
 e_gen_dir := $(prj_dir)/gen
 tools_dir := $(abspath $(CURDIR))
 caps_dir  := $(tools_dir)/capabilities
-ifneq ($(REBAR_DEPS_DIR),)
-deps_dir  := $(abspath $(REBAR_DEPS_DIR))
-else ifneq ($(DEPS_DIR),)
-deps_dir  := $(abspath $(DEPS_DIR))
-else
-deps_dir  := $(abspath $(firstword $(wildcard $(prj_dir)/../components) $(prj_dir)/..))
-endif
 
-db_root	:= $(wildcard $(deps_dir)/leveldb)
-sn_root	:= $(wildcard $(deps_dir)/snappy)
+# there are multiple places we may find dependencies in Rebar3
+# we may also be running make outside of rebar, so test for each variable
+# the resulting list *may* contain duplicates, but it's not worth de-duping
+deps_dirs :=
+ifneq ($(REBAR_CHECKOUTS_DIR),)
+deps_dirs := $(wildcard $(REBAR_CHECKOUTS_DIR))
+endif
+ifneq ($(REBAR_BUILD_DIR),)
+deps_dirs += $(wildcard $(REBAR_BUILD_DIR)/lib)
+endif
+ifneq ($(REBAR_DEPS_DIR),)
+deps_dirs += $(wildcard $(REBAR_DEPS_DIR))
+endif
+ifneq ($(REBAR_ROOT_DIR),)
+deps_dirs += $(wildcard $(REBAR_ROOT_DIR)/..)
+endif
+deps_dirs += $(wildcard $(prj_dir)/..)
+deps_dirs := $(abspath $(deps_dirs))
+
+db_root	:= $(firstword $(wildcard $(patsubst %,%/leveldb,$(deps_dirs))))
+sn_root	:= $(firstword $(wildcard $(patsubst %,%/snappy,$(deps_dirs))))
 ee_root	:= $(patsubst %/,%,$(firstword \
-		$(dir $(wildcard $(deps_dir)/leveldb_ee/*.cc)) \
-		$(db_root)/stubs ))
+		$(dir $(wildcard $(patsubst %,%/leveldb_ee/*.cc,$(deps_dirs)))) \
+		$(wildcard $(db_root)/leveldb_os $(db_root)/stubs) ))
 
 # probably overkill, but we really want the system's POSIX uname and not
 # any wrapper/alternate that may come first in the path
@@ -59,7 +71,7 @@ sys_arch := $(shell $(uname) -m | tr '[A-Z]' '[a-z]')
 sys_rel  := $(shell $(uname) -r | tr '[A-Z]' '[a-z]')
 
 #
-# Qll about erlang ...
+# All about erlang ...
 #
 # This will normally be invoked by rebar3, so use the environment variables
 # it sets if they're present rather than interogating the Erlang runtime.
@@ -82,7 +94,10 @@ erl_tmp	+= {R,_} = string:to_integer(S),
 erl_tmp	+= io:put_chars(erlang:integer_to_list(R)), erlang:halt().
 otp_rel	:= $(shell $(erl_eval) '$(erl_tmp)' 2>/dev/null)
 
-erl_tmp	:= io:put_chars(erlang:system_info(nif_version)), erlang:halt().
+# 'nif_version' added in OTP-17, punt before that - R16's NIF API is v2.4
+erl_tmp	:= S = case erlang:system_info(otp_release) of
+erl_tmp	+= [$$R|_] -> "2.4"; _ -> erlang:system_info(nif_version) end,
+erl_tmp	+= io:put_chars(S), erlang:halt().
 nif_api := $(shell $(erl_eval) '$(erl_tmp)' 2>/dev/null)
 
 ifneq ($(ERLANG_ERTS_VER),)
@@ -119,7 +134,7 @@ db_tool_names := leveldb_repair perf_dump sst_rewrite sst_scan
 db_tools := $(patsubst %,$(prj_dir)/priv/%_$(sys_type)_$(sys_arch),$(db_tool_names))
 
 # directories where intermediate artifacts will go
-work_dir    := $(prj_dir)/work/otp-$(otp_rel)/$(sys_type)-$(sys_arch)-$(sys_rel)
+work_dir    := $(prj_dir)/_work/otp-$(otp_rel)/$(sys_type)-$(sys_arch)-$(sys_rel)
 feat_dir    := $(work_dir)/feat
 c_gen_dir   := $(work_dir)/gen_c
 d_gen_dir   := $(work_dir)/gen_d
@@ -170,7 +185,7 @@ sn_conf	:= $(c_gen_dir)/snappy/config.h
 sn_stub	:= $(c_gen_dir)/snappy-stubs-public.h
 sn_vsn	:= $(shell cd $(sn_root) && git describe --tags 2>/dev/null | cut -d- -f1)
 sn_srcs	:= $(filter-out %test.cc, $(wildcard $(sn_root)/*.cc))
-sn_deps	:= $(patsubst $(deps_dir)/%.cc,$(d_gen_dir)/%.d,$(sn_srcs))
+sn_deps	:= $(patsubst $(dir $(sn_root))%.cc,$(d_gen_dir)/%.d,$(sn_srcs))
 
 #
 # The NIF is pretty straightforward
@@ -186,6 +201,12 @@ db_libs	:= -L$(ar_obj_dir) -l$(ar_name)
 so_libs	:= $(db_libs) -L$(ei_lib) -lerl_interface -lei
 os_libs	:=
 
+ifeq ($(DEBUG),)
+CPPFLAGS := -DNDEBUG
+else
+CPPFLAGS :=
+endif
+
 LDFLAGS := -m64
 CFLAGS	:= $(LDFLAGS)
 CXXFLAGS := $(LDFLAGS)
@@ -199,8 +220,8 @@ ecp	:= /bin/cp -pX
 CC	:= /usr/bin/cc
 CXX	:= /usr/bin/c++
 LDFLAGS := -arch x86_64
-LDFLAGS	+= $(shell test $(firstword $(subst ., ,$(sys_rel))) -lt 13 \
-		|| echo '-mmacosx-version-min=10.8')
+LDFLAGS	+= $(shell test $(firstword $(subst ., ,$(sys_rel))) -lt 14 \
+		|| echo '-mmacosx-version-min=10.9')
 CFLAGS	:= $(LDFLAGS)
 CXXFLAGS := $(LDFLAGS)
 so_flag	:= -flat_namespace -undefined suppress -dynamiclib
@@ -270,7 +291,7 @@ link        = $(CXX) $(LDFLAGS)
 db_cppflags   := $(foreach d, $(db_defs), -D$(d))
 db_cppflags   += '-DLEVELDB_VSN=$(db_vsn)'
 db_cppflags   += -I$(c_gen_dir) -I$(db_root) -I$(db_root)/include
-db_cppflags   += -I$(c_gen_dir)/snappy -I$(sn_root) -I$(deps_dir)
+db_cppflags   += -I$(c_gen_dir)/snappy -I$(sn_root) -I$(abspath $(sn_root)/..)
 nif_cppflags  := -I$(c_gen_dir) -I$(db_root)/include -I$(db_root)
 nif_cppflags  += -I$(sn_root) -I$(erts_inc) -I$(ei_inc)
 sn_cppflags   := -I$(c_gen_dir)/snappy -I$(c_gen_dir)
@@ -313,7 +334,7 @@ build_info ::
 	@echo 'EI Include:     $(ei_inc)'
 	@echo 'EI Libs:        $(ei_lib)'
 	@echo 'NIF Library:    $(so_dest)'
-
+	@echo 'Deps Dirs:      $(deps_dirs)'
 
 $(prj_dir)/priv/% : $(stage_dir)/%
 	@test -d $(@D) || /bin/mkdir -p $(@D)

@@ -1,6 +1,6 @@
 # -------------------------------------------------------------------
 #
-# Copyright (c) 2011-2016 Basho Technologies, Inc.
+# Copyright (c) 2011-2017 Basho Technologies, Inc.
 #
 # This file is provided to you under the Apache License,
 # Version 2.0 (the "License"); you may not use this file
@@ -25,18 +25,60 @@ dl_tgts	:=
 #
 # tools
 #
-REBAR3	?= $(cache)/rebar3
-ifneq ($(wildcard $(REBAR3)),)
-rebar	:= $(REBAR3)
-else
-rebar	:= $(cache)/rebar3
-dl_tgts	+= $(rebar)
+ifeq ($(REBAR3),)
+REBAR3	:= $(cache)/rebar3
+dl_tgts	+= $(REBAR3)
 endif
+export	REBAR3
+RM	?= /bin/rm
+
+.PHONY	: check clean clean-deps clean-docs clean-dist compile dialyzer \
+	  default docs prereqs test validate veryclean xref
+
+default : compile
+
+prereqs ::
+
+compile :: prereqs
+	$(REBAR3) as prod compile
+
+check :: prereqs
+	$(REBAR3) as check do brt-deps --check, dialyzer, xref
+
+clean :: prereqs
+	$(REBAR3) clean --all
+
+clean-deps :: clean
+	$(RM) -rf $(prj_dir)/_build
+
+clean-docs ::
+	$(REBAR3) as docs clean
+
+clean-dist ::
+
+docs :: prereqs
+	$(REBAR3) edoc
+
+dialyzer :: prereqs
+	$(REBAR3) as check dialyzer
+
+test :: prereqs
+	$(REBAR3) eunit
+
+validate :: prereqs
+	$(REBAR3) as validate compile
+
+veryclean :: clean clean-docs clean-deps clean-dist
+	$(RM) -rf $(cache)
+
+xref :: prereqs
+	$(REBAR3) as check xref
 
 #
 # how to download files if we need to
 #
 ifneq ($(dl_tgts),)
+
 dlcmd	:= $(shell which wget 2>/dev/null || true)
 ifneq ($(wildcard $(dlcmd)),)
 dlcmd	+= -O
@@ -48,41 +90,11 @@ else
 $(error Need wget or curl to download files)
 endif
 endif
-endif
 
-.PHONY	: check clean clean-deps clean-docs compile \
-	  default docs prereqs test veryclean
-
-default : compile
-
-compile : prereqs
-	$(rebar) as prod compile
-
-check : prereqs
-	$(rebar) as check do dialyzer, xref
-
-clean : prereqs
-	$(rebar) as prod clean
-
-clean-deps :: clean
-	/bin/rm -rf $(prj_dir)/_build
-
-clean-docs :
-	/bin/rm -rf $(prj_dir)/doc/*
-
-docs : prereqs
-	$(rebar) edoc
-
-test : prereqs
-	$(rebar) eunit
-
-veryclean :: clean clean-deps clean-dist clean-docs
-	/bin/rm -rf $(cache)
-
-#
-# downloads
-#
 prereqs :: $(dl_tgts)
+
+veryclean ::
+	$(RM) -rf $(dl_tgts)
 
 $(cache)/rebar3 :
 	@test -d $(@D) || /bin/mkdir -p $(@D)
@@ -90,3 +102,4 @@ $(cache)/rebar3 :
 	@$(dlcmd) $@ https://s3.amazonaws.com/rebar3/rebar3
 	@/bin/chmod +x $@
 
+endif	# dl_tgts
