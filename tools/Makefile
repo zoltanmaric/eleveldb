@@ -134,7 +134,12 @@ db_tool_names := leveldb_repair perf_dump sst_rewrite sst_scan
 db_tools := $(patsubst %,$(prj_dir)/priv/%_$(sys_type)_$(sys_arch),$(db_tool_names))
 
 # directories where intermediate artifacts will go
-work_dir    := $(prj_dir)/_work/otp-$(otp_rel)/$(sys_type)-$(sys_arch)-$(sys_rel)
+ifneq ($(REBAR_BUILD_DIR),)
+work_dir    := $(REBAR_BUILD_DIR)/lib/$(module)/_work
+else
+work_dir    := $(prj_dir)/_work
+endif
+work_dir    := $(work_dir)/otp-$(otp_rel)/$(sys_type)-$(sys_arch)-$(sys_rel)
 feat_dir    := $(work_dir)/feat
 c_gen_dir   := $(work_dir)/gen_c
 d_gen_dir   := $(work_dir)/gen_d
