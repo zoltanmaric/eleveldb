@@ -788,6 +788,8 @@ async_write(
     const ERL_NIF_TERM& action_ref = argv[2];
     const ERL_NIF_TERM& opts_ref   = argv[3];
 
+    FOUT("Async Writing an item at tick: " << getCurrentMicroSeconds());
+
     ReferencePtr<DbObject> db_ptr;
 
     db_ptr.assign(DbObject::RetrieveDbObject(env, handle_ref));
@@ -838,6 +840,8 @@ sync_write(
     const ERL_NIF_TERM& action_ref = argv[2];
     const ERL_NIF_TERM& opts_ref   = argv[3];
 
+    FOUT("Sync Writing an item at tick: " << getCurrentMicroSeconds());
+    
     ReferencePtr<DbObject> db_ptr;
 
     db_ptr.assign(DbObject::RetrieveDbObject(env, handle_ref));
@@ -1375,7 +1379,7 @@ struct timespec ts;
 // this is rumored to be faster that gettimeofday(), and sometimes
 // shift less ... someday use CLOCK_MONOTONIC_RAW
 
- clock_gettime(CLOCK_MONOTONIC, &ts);
+ clock_gettime(CLOCK_REALTIME, &ts);
  return static_cast<uint64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec/1000;
 
 #else
