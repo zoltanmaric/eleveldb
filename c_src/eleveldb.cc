@@ -777,6 +777,28 @@ async_open(
 
 }   // async_open
 
+    int64_t getCurrentMicroSeconds()
+{
+#if _POSIX_TIMERS >= 200801L
+
+struct timespec ts;
+
+// this is rumored to be faster that gettimeofday(), and sometimes
+// shift less ... someday use CLOCK_MONOTONIC_RAW
+
+ clock_gettime(CLOCK_REALTIME, &ts);
+ return static_cast<uint64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec/1000;
+
+#else
+
+struct timeval tv;
+gettimeofday(&tv, NULL);
+return static_cast<uint64_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
+
+#endif
+}
+
+
 ERL_NIF_TERM
 async_write(
     ErlNifEnv* env,
@@ -841,7 +863,7 @@ sync_write(
     const ERL_NIF_TERM& opts_ref   = argv[3];
 
     FOUT("Sync Writing an item at tick: " << getCurrentMicroSeconds());
-    
+
     ReferencePtr<DbObject> db_ptr;
 
     db_ptr.assign(DbObject::RetrieveDbObject(env, handle_ref));
@@ -1369,27 +1391,6 @@ streaming_start(ErlNifEnv * env,
                            enif_make_tuple2(env, reply_ref, sync_ref));
 
 } // streaming_start
-
-int64_t getCurrentMicroSeconds()
-{
-#if _POSIX_TIMERS >= 200801L
-
-struct timespec ts;
-
-// this is rumored to be faster that gettimeofday(), and sometimes
-// shift less ... someday use CLOCK_MONOTONIC_RAW
-
- clock_gettime(CLOCK_REALTIME, &ts);
- return static_cast<uint64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec/1000;
-
-#else
-
-struct timeval tv;
-gettimeofday(&tv, NULL);
-return static_cast<uint64_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
-
-#endif
-}
 
 ERL_NIF_TERM
 currentMicroSeconds(
