@@ -342,17 +342,28 @@ validate_options(Type, Opts) ->
 -spec callback_router() -> ok.
 callback_router() ->
     receive
-        {get_bucket_properties,Name, Key} ->
-            Props=riak_core_bucket:get_bucket(Name),
+        {get_bucket_properties, Name, Key} ->
+            Props = get_bucket_props(Name),
             property_cache(Key, Props),
             callback_router();
-
         callback_shutdown ->
             ok;
-
        _ ->
            callback_router()
     end.
+
+get_bucket_props(Bucket) ->
+    case riak_kv_qry_buffers:ldb_expiry_request(Bucket) of
+        {ok, Status} when Status == expiring;
+                          Status == expired ->
+            [{expiry_enabled, true},
+             {expory_minutes, 0}];
+        {ok, _} ->
+            [{expiry_enabled, false}];
+        {error, not_a_qbuf} ->
+            riak_core_bucket:get_bucket(Bucket)
+    end.
+
 
 -spec property_cache(string(), string()) -> ok.
 property_cache(_BucketKey, _Properties) ->
