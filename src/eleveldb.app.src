@@ -1,26 +1,40 @@
-{application, eleveldb,
- [
-  {description, ""},
-  {vsn, git},
-  {registered, []},
-  {applications, [
-                  kernel,
-                  stdlib
-                 ]},
-  {env, [
-         %% what percent of total memory should go to
-         %%  leveldb.  Default is 15% on the basis of
-         %%  a single development machine running 5
-         %%  Riak instances would therefore claim 75%.
-         %% REAL users will want this at 70%.
-         {total_leveldb_mem_percent, 15},
+%% -------------------------------------------------------------------
+%%
+%% Copyright (c) 2011-2017 Basho Technologies, Inc.
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%
+%% -------------------------------------------------------------------
+{application, eleveldb, [
+    {description,   "Erlang LevelDB"},
+    {vsn,           git},
+    {registered,    []},
+    {applications,  [kernel, stdlib, os_mon]},
+    {env, [
+        %% what percent of total memory should go to
+        %%  leveldb.  Default is 15% on the basis of
+        %%  a single development machine running 5
+        %%  Riak instances would therefore claim 75%.
+        %% REAL users will want this at 70%.
+        {total_leveldb_mem_percent, 15},
 
-         %% Use bloom filter support by default
-         {use_bloomfilter, true},
+        %% Use bloom filter support by default
+        {use_bloomfilter, true},
 
-         %% Users with "older" configs should get
-         %%  "older" compression by default
-         {compression, snappy}
-
-        ]}
- ]}.
+        %% Users with "older" configs should get
+        %%  "older" compression by default
+        {compression, snappy}
+    ]}
+]}.
