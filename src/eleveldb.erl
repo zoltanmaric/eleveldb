@@ -1,6 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% Copyright (c) 2010-2016 Basho Technologies, Inc.
+%% Copyright (c) 2010-2017 Basho Technologies, Inc.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -17,47 +17,69 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
-%%
-%% Erlang NIF wrapper for LevelDB
-%%
+
+%% @doc Erlang NIF wrapper for LevelDB
 -module(eleveldb).
 
--export([open/2,
-         close/1,
-         get/3,
-         put/4,
-         async_put/5,
-         delete/3,
-         write/3,
-         fold/4,
-         fold_keys/4,
-         status/2,
-         destroy/2,
-         repair/2,
-         is_empty/1]).
+-export([
+    async_put/5,
+    close/1,
+    delete/3,
+    destroy/2,
+    fold/4,
+    fold_keys/4,
+    get/3,
+    is_empty/1,
+    open/2,
+    put/4,
+    repair/2,
+    status/2,
+    write/3
+]).
 
--export([option_types/1,
-         validate_options/2]).
+-export([
+    option_types/1,
+    validate_options/2
+]).
 
--export([iterator/2,
-         iterator/3,
-         iterator_move/2,
-         iterator_close/1]).
+-export([
+    iterator/2,
+    iterator/3,
+    iterator_close/1,
+    iterator_move/2
+]).
 
--export_type([db_ref/0,
-              itr_ref/0]).
+-export_type([
+    db_ref/0,
+    itr_ref/0
+]).
 
+-ifdef(BASHO_CHECK).
+% Older Dialyzer and XRef won't recognize 'on_load' as meaning the
+% function is used and will complain about it.
+-export([init_nif_lib/0]).
+-endif.
 -on_load(init_nif_lib/0).
 
 -ifdef(TEST).
--compile(export_all).
+-export([
+    assert_close/1,
+    assert_open/1,
+    assert_open/2,
+    create_test_dir/0,
+    delete_test_dir/1,
+    terminal_format/2
+]).
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
--define(QC_OUT(P),
-        eqc:on_output(fun(Str, Args) -> io:format(user, Str, Args) end, P)).
+-define(QC_OUT(P), eqc:on_output(fun terminal_format/2, P)).
 -endif.
 -include_lib("eunit/include/eunit.hrl").
 -endif.
+
+% IF the application name departs from this module's name, this will need to
+% be changed accordingly.
+-define(APPLICATION, ?MODULE).
 
 %% How many previous OTP releases to try if we don't find a NIF library built
 %% with the current version.
@@ -66,9 +88,9 @@
 %% This cannot be a separate function. Code must be inline to trigger
 %% Erlang compiler's use of optimized selective receive.
 -define(WAIT_FOR_REPLY(Ref),
-        receive {Ref, Reply} ->
-                Reply
-        end).
+    receive {Ref, Reply} ->
+        Reply
+    end).
 
 -define(COMPRESSION_ENUM, [snappy, lz4, false]).
 
@@ -122,8 +144,10 @@
 
 -type iterator_action() :: first | last | next | prev | prefetch | prefetch_stop | binary().
 
--opaque db_ref() :: binary().
-
+% These are actually NIF 'resource' objects, but need a type less general
+% than term() to make the compiler happy.
+% There is no suitable guard test!
+-opaque db_ref()  :: binary().
 -opaque itr_ref() :: binary().
 
 -spec async_open(reference(), string(), open_options()) -> ok.
@@ -362,7 +386,12 @@ do_fold(Itr, Fun, Acc0, Opts) ->
         true = is_binary(Start) or (Start == first),
         fold_loop(iterator_move(Itr, Start), Itr, Fun, Acc0)
     after
-        iterator_close(Itr)
+        %% This clause shouldn't change the operation's result.
+        %% If the iterator has been invalidated by it or the db being closed,
+        %% the try clause above will raise an exception, and that's the one we
+        %% want to propagate. Catch the exception this raises in that case and
+        %% ignore it so we don't obscure the original.
+        catch iterator_close(Itr)
     end.
 
 fold_loop({error, iterator_closed}, _Itr, _Fun, Acc0) ->
@@ -393,16 +422,19 @@ validate_type(_, _)                                          -> false.
 -spec init_nif_lib() -> init_result().
 %% Called once at module load.
 init_nif_lib() ->
-    SoDir = case code:priv_dir(?MODULE) of
+    SoDir = case code:priv_dir(?APPLICATION) of
         {error, bad_name} ->
+            % Do NOT call anything that could attempt to load this module!
             case code:which(?MODULE) of
-                Filename when is_list(Filename) ->
-                    filename:join(filename:dirname(Filename), "../priv");
+                Beam when is_list(Beam) ->
+                    filename:join(filename:dirname(filename:dirname(Beam)), "priv");
                 _ ->
-                    "../priv"
+                    {ok, CWD} = file:get_cwd(),
+                    % This is almost certainly wrong, but it's equivalent to "../priv".
+                    filename:join(filename:dirname(CWD), "priv")
             end;
-        Dir ->
-            Dir
+        PDir ->
+            PDir
     end,
     {_, Sys} = os:type(),
     Arch = erlang:hd(string:tokens(erlang:system_info(system_architecture), "-")),
@@ -414,7 +446,7 @@ init_nif_lib() ->
     end,
     % start at the current version, work backward to find a NIF library
     {Otp, _} = string:to_integer(Rel),
-    AppEnv = application:get_all_env(eleveldb),
+    AppEnv = application:get_all_env(?APPLICATION),
     Prefix = io_lib:format("~s/eleveldb_~s_~s_otp", [SoDir, Sys, Arch]),
     init_nif_lib(
         lists:seq(Otp, (Otp - ?OTP_PREV_RELS), -1), Prefix, AppEnv, []).
@@ -443,105 +475,270 @@ init_nif_lib([], _, _, Errors) ->
 
 
 %% ===================================================================
-%% EUnit tests
+%% Tests
 %% ===================================================================
 -ifdef(TEST).
 
-open_test() -> [{open_test_Z(), l} || l <- lists:seq(1, 20)].
-open_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.open.test"),
-    {ok, Ref} = open("/tmp/eleveldb.open.test", [{create_if_missing, true}]),
-    ok = ?MODULE:put(Ref, <<"abc">>, <<"123">>, []),
-    {ok, <<"123">>} = ?MODULE:get(Ref, <<"abc">>, []),
-    not_found = ?MODULE:get(Ref, <<"def">>, []).
+%% ===================================================================
+%% Exported Test Helpers
+%% ===================================================================
 
-fold_test() -> [{fold_test_Z(), l} || l <- lists:seq(1, 20)].
-fold_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.fold.test"),
-    {ok, Ref} = open("/tmp/eleveldb.fold.test", [{create_if_missing, true}]),
-    ok = ?MODULE:put(Ref, <<"def">>, <<"456">>, []),
-    ok = ?MODULE:put(Ref, <<"abc">>, <<"123">>, []),
-    ok = ?MODULE:put(Ref, <<"hij">>, <<"789">>, []),
-    [{<<"abc">>, <<"123">>},
-     {<<"def">>, <<"456">>},
-     {<<"hij">>, <<"789">>}] = lists:reverse(fold(Ref, fun({K, V}, Acc) -> [{K, V} | Acc] end,
-                                                  [], [])).
+-spec assert_close(DbRef :: db_ref()) -> ok | no_return().
+%
+% Closes DbRef inside an ?assert... macro.
+%
+assert_close(DbRef) ->
+    ?assertEqual(ok, ?MODULE:close(DbRef)).
 
-fold_keys_test() -> [{fold_keys_test_Z(), l} || l <- lists:seq(1, 20)].
-fold_keys_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.fold.keys.test"),
-    {ok, Ref} = open("/tmp/eleveldb.fold.keys.test", [{create_if_missing, true}]),
-    ok = ?MODULE:put(Ref, <<"def">>, <<"456">>, []),
-    ok = ?MODULE:put(Ref, <<"abc">>, <<"123">>, []),
-    ok = ?MODULE:put(Ref, <<"hij">>, <<"789">>, []),
-    [<<"abc">>, <<"def">>, <<"hij">>] = lists:reverse(fold_keys(Ref,
-                                                                fun(K, Acc) -> [K | Acc] end,
-                                                                [], [])).
+-spec assert_open(DbPath :: string()) -> db_ref() | no_return().
+%
+% Opens Path inside an ?assert... macro, creating the database directory if needed.
+%
+assert_open(DbPath) ->
+    assert_open(DbPath, [{create_if_missing, true}]).
 
-fold_from_key_test() -> [{fold_from_key_test_Z(), l} || l <- lists:seq(1, 20)].
-fold_from_key_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.fold.fromkeys.test"),
-    {ok, Ref} = open("/tmp/eleveldb.fromfold.keys.test", [{create_if_missing, true}]),
-    ok = ?MODULE:put(Ref, <<"def">>, <<"456">>, []),
-    ok = ?MODULE:put(Ref, <<"abc">>, <<"123">>, []),
-    ok = ?MODULE:put(Ref, <<"hij">>, <<"789">>, []),
-    [<<"def">>, <<"hij">>] = lists:reverse(fold_keys(Ref,
-                                                     fun(K, Acc) -> [K | Acc] end,
-                                                     [], [{first_key, <<"d">>}])).
+-spec assert_open(DbPath :: string(), OpenOpts :: open_options())
+            -> db_ref() | no_return().
+%
+% Opens DbPath, with OpenOpts, inside an ?assert... macro.
+%
+assert_open(DbPath, OpenOpts) ->
+    OpenRet = ?MODULE:open(DbPath, OpenOpts),
+    ?assertMatch({ok, _}, OpenRet),
+    {_, DbRef} = OpenRet,
+    DbRef.
 
-destroy_test() -> [{destroy_test_Z(), l} || l <- lists:seq(1, 20)].
-destroy_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.destroy.test"),
-    {ok, Ref} = open("/tmp/eleveldb.destroy.test", [{create_if_missing, true}]),
-    ok = ?MODULE:put(Ref, <<"def">>, <<"456">>, []),
-    {ok, <<"456">>} = ?MODULE:get(Ref, <<"def">>, []),
-    close(Ref),
-    ok = ?MODULE:destroy("/tmp/eleveldb.destroy.test", []),
-    {error, {db_open, _}} = open("/tmp/eleveldb.destroy.test", [{error_if_exists, true}]).
+-spec create_test_dir() -> string() | no_return().
+%
+% Creates a new, empty, uniquely-named directory for testing and returns
+% its full path. This operation *should* never fail, but would raise an
+% ?assert...-ish exception if it did.
+%
+create_test_dir() ->
+    string:strip(?cmd("mktemp -d /tmp/" ?MODULE_STRING ".XXXXXXX"), both, $\n).
 
-compression_test() -> [{compression_test_Z(), l} || l <- lists:seq(1, 20)].
-compression_test_Z() ->
-    CompressibleData = list_to_binary([0 || _X <- lists:seq(1,20)]),
-    os:cmd("rm -rf /tmp/eleveldb.compress.0 /tmp/eleveldb.compress.1"),
-    {ok, Ref0} = open("/tmp/eleveldb.compress.0", [{write_buffer_size, 5},
-                                                   {create_if_missing, true},
-                                                   {compression, false}]),
-    [ok = ?MODULE:put(Ref0, <<I:64/unsigned>>, CompressibleData, [{sync, true}]) ||
-        I <- lists:seq(1,10)],
-    {ok, Ref1} = open("/tmp/eleveldb.compress.1", [{write_buffer_size, 5},
-                                                   {create_if_missing, true},
-                                                   {compression, true}]),
-    [ok = ?MODULE:put(Ref1, <<I:64/unsigned>>, CompressibleData, [{sync, true}]) ||
-        I <- lists:seq(1,10)],
-	%% Check both of the LOG files created to see if the compression option was correctly
-	%% passed down
-	MatchCompressOption =
-		fun(File, Expected) ->
-				{ok, Contents} = file:read_file(File),
-				case re:run(Contents, "Options.compression: " ++ Expected) of
-					{match, _} -> match;
-					nomatch -> nomatch
-				end
-		end,
-	Log0Option = MatchCompressOption("/tmp/eleveldb.compress.0/LOG", "0"),
-	Log1Option = MatchCompressOption("/tmp/eleveldb.compress.1/LOG", "1"),
-	?assert(Log0Option =:= match andalso Log1Option =:= match).
+-spec delete_test_dir(Dir :: string()) -> ok | no_return().
+%
+% Deletes a test directory fully, whether or not it exists.
+% This operation *should* never fail, but would raise an ?assert...-ish
+% exception if it did.
+%
+delete_test_dir(Dir) ->
+    ?assertCmd("rm -rf " ++ Dir).
 
+-spec terminal_format(Fmt :: io:format(), Args :: list()) -> ok.
+%
+% Writes directly to the terminal, bypassing EUnit hooks.
+%
+terminal_format(Fmt, Args) ->
+    io:format(user, Fmt, Args).
 
-close_test() -> [{close_test_Z(), l} || l <- lists:seq(1, 20)].
-close_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.close.test"),
-    {ok, Ref} = open("/tmp/eleveldb.close.test", [{create_if_missing, true}]),
-    ?assertEqual(ok, close(Ref)),
-    ?assertEqual({error, einval}, close(Ref)).
+%% ===================================================================
+%% EUnit Tests
+%% ===================================================================
 
-close_fold_test() -> [{close_fold_test_Z(), l} || l <- lists:seq(1, 20)].
-close_fold_test_Z() ->
-    os:cmd("rm -rf /tmp/eleveldb.close_fold.test"),
-    {ok, Ref} = open("/tmp/eleveldb.close_fold.test", [{create_if_missing, true}]),
-    ok = eleveldb:put(Ref, <<"k">>,<<"v">>,[]),
-    ?assertException(throw, {iterator_closed, ok}, % ok is returned by close as the acc
-                     eleveldb:fold(Ref, fun(_,_A) -> eleveldb:close(Ref) end, undefined, [])).
+-define(local_test(TestFunc),
+    fun(TestRoot) ->
+        Title = erlang:atom_to_list(TestFunc),
+        TestDir = filename:join(TestRoot, TestFunc),
+        {Title, fun() -> TestFunc(TestDir) end}
+    end
+).
+
+eleveldb_test_() ->
+    {foreach,
+        fun create_test_dir/0,
+        fun delete_test_dir/1,
+        [
+            ?local_test(test_open),
+            ?local_test(test_close),
+            ?local_test(test_destroy),
+            ?local_test(test_fold),
+            ?local_test(test_fold_keys),
+            ?local_test(test_fold_from_key),
+            ?local_test(test_close_fold),
+            % On weak machines the following can take a while, so we tweak
+            % them a bit to avoid timeouts. On anything resembling a competent
+            % computer, these should complete in a small fraction of a second,
+            % well under the default 5 second timeout, but on lightweight VMs
+            % used for validation, that can be extended by orders of magnitude.
+            % Anything that can't run a test that should complete comfortably
+            % in a tenth of a second within 150 times that doesn't deserve to
+            % be called a computer.
+            fun(TestRoot) ->
+                TestName = "test_compression",
+                TestDir = filename:join(TestRoot, TestName),
+                {TestName, {timeout, 15, fun() -> test_compression(TestDir) end}}
+            end,
+            fun(TestRoot) ->
+                TestName = "test_open_many",
+                TestDir = filename:join(TestRoot, TestName),
+                Count = (erlang:system_info(schedulers) * 4 + 1),
+                Title = lists:flatten(io_lib:format("~s(~b)", [TestName, Count])),
+                {Title, {timeout, 15, fun() -> test_open_many(TestDir, Count) end}}
+            end
+        ]
+    }.
+
+% fold accumulator used in a few tests
+accumulate(Val, Acc) ->
+    [Val | Acc].
+
+%
+% Individual tests
+%
+
+test_open(TestDir) ->
+    Ref = assert_open(TestDir),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"abc">>, <<"123">>, [])),
+    ?assertEqual({ok, <<"123">>}, ?MODULE:get(Ref, <<"abc">>, [])),
+    ?assertEqual(not_found, ?MODULE:get(Ref, <<"def">>, [])),
+    assert_close(Ref).
+
+test_open_many(TestDir, HowMany) ->
+    Insts   = lists:seq(1, HowMany),
+    KNonce  = erlang:make_ref(),
+    VNonce  = erlang:self(),
+    WorkSet = [{
+        assert_open(lists:flatten(io_lib:format("~s.~b", [TestDir, N]))),
+        erlang:integer_to_binary(erlang:phash2([os:timestamp(), KNonce, N])),
+        erlang:integer_to_binary(erlang:phash2([os:timestamp(), VNonce, N]))}
+        || N <- Insts],
+    lists:foreach(
+        fun({Ref, Key, Val}) ->
+            ?assertEqual(ok, ?MODULE:put(Ref, Key, Val, []))
+        end, WorkSet),
+    lists:foreach(
+        fun({Ref, Key, Val}) ->
+            ?assertEqual({ok, Val}, ?MODULE:get(Ref, Key, []))
+        end, WorkSet),
+    lists:foreach(fun assert_close/1, [R || {R, _, _} <- WorkSet]).
+
+test_close(TestDir) ->
+    Ref = assert_open(TestDir, [{create_if_missing, true}]),
+    assert_close(Ref),
+    ?assertError(badarg, ?MODULE:close(Ref)).
+
+test_fold(TestDir) ->
+    Ref = assert_open(TestDir),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"def">>, <<"456">>, [])),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"abc">>, <<"123">>, [])),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"hij">>, <<"789">>, [])),
+    ?assertEqual(
+        [{<<"abc">>, <<"123">>}, {<<"def">>, <<"456">>}, {<<"hij">>, <<"789">>}],
+        lists:reverse(?MODULE:fold(Ref, fun accumulate/2, [], []))),
+    assert_close(Ref).
+
+test_fold_keys(TestDir) ->
+    Ref = assert_open(TestDir),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"def">>, <<"456">>, [])),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"abc">>, <<"123">>, [])),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"hij">>, <<"789">>, [])),
+    ?assertEqual(
+        [<<"abc">>, <<"def">>, <<"hij">>],
+        lists:reverse(?MODULE:fold_keys(Ref, fun accumulate/2, [], []))),
+    assert_close(Ref).
+
+test_fold_from_key(TestDir) ->
+    Ref = assert_open(TestDir),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"def">>, <<"456">>, [])),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"abc">>, <<"123">>, [])),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"hij">>, <<"789">>, [])),
+    ?assertEqual([<<"def">>, <<"hij">>], lists:reverse(
+        ?MODULE:fold_keys(Ref, fun accumulate/2, [], [{first_key, <<"d">>}]))),
+    assert_close(Ref).
+
+test_destroy(TestDir) ->
+    Ref = assert_open(TestDir),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"def">>, <<"456">>, [])),
+    ?assertEqual({ok, <<"456">>}, ?MODULE:get(Ref, <<"def">>, [])),
+    assert_close(Ref),
+    ?assertEqual(ok, ?MODULE:destroy(TestDir, [])),
+    ?assertMatch({error, {db_open, _}}, ?MODULE:open(TestDir, [{error_if_exists, true}])).
+
+test_compression(TestDir) ->
+    IntSeq = lists:seq(1, 10),
+    CompressibleData = erlang:list_to_binary(lists:duplicate(20, 0)),
+
+    Ref0 = assert_open(TestDir ++ ".0", [
+        {write_buffer_size, 5}, {create_if_missing, true}, {compression, false}]),
+    lists:foreach(
+        fun(I) ->
+            ?assertEqual(ok,
+                ?MODULE:put(Ref0, <<I:64/unsigned>>, CompressibleData, [{sync, true}]))
+        end, IntSeq),
+
+    Ref1 = assert_open(TestDir ++ ".1", [
+        {write_buffer_size, 5}, {create_if_missing, true}, {compression, true}]),
+    lists:foreach(
+        fun(I) ->
+            ?assertEqual(ok,
+                ?MODULE:put(Ref1, <<I:64/unsigned>>, CompressibleData, [{sync, true}]))
+        end, IntSeq),
+
+    %% Check both of the LOG files created to see if the compression option was
+    %% passed down correctly
+    lists:foreach(
+        fun(Val) ->
+            File = filename:join(TestDir ++ [$. | Val], "LOG"),
+            RRet = file:read_file(File),
+            ?assertMatch({ok, _}, RRet),
+            {_, Data} = RRet,
+            Pattern = "Options.compression: " ++ Val,
+            ?assertMatch({match, _}, re:run(Data, Pattern))
+        end, ["0", "1"]),
+    assert_close(Ref0),
+    assert_close(Ref1).
+
+test_close_fold(TestDir) ->
+    Ref = assert_open(TestDir),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"k">>,<<"v">>,[])),
+    ?assertError(badarg,
+        ?MODULE:fold(Ref, fun(_,_) -> assert_close(Ref) end, undefined, [])).
+
+%
+% Parallel tests
+%
+
+parallel_test_() ->
+    ParaCnt = (erlang:system_info(schedulers) * 2 + 1),
+    LoadCnt = 199,
+    TestSeq = lists:seq(1, ParaCnt),
+    {foreach,
+        fun create_test_dir/0,
+        fun delete_test_dir/1,
+        [fun(TestRoot) ->
+            {inparallel, [begin
+                T = lists:flatten(io_lib:format("load proc ~b", [N])),
+                D = filename:join(TestRoot, io_lib:format("parallel_test.~b", [N])),
+                S = lists:seq(N, (N + LoadCnt - 1)),
+                {T, fun() -> run_load(D, S) end}
+            end || N <- TestSeq]}
+        end]
+    }.
+
+run_load(TestDir, IntSeq) ->
+    Nonce   = [os:timestamp(), erlang:self()],
+    KVIn    = [{
+        erlang:integer_to_binary(erlang:phash2([erlang:make_ref(), N | Nonce])),
+        erlang:integer_to_binary(erlang:phash2([N, erlang:make_ref() | Nonce]))
+        } || N <- IntSeq],
+    {L, R}  = lists:split(erlang:hd(IntSeq), KVIn),
+    KVOut   = R ++ L,
+    Ref     = assert_open(TestDir),
+    lists:foreach(
+        fun({Key, Val}) ->
+            ?assertEqual(ok, ?MODULE:put(Ref, Key, Val, []))
+        end, KVIn),
+    lists:foreach(
+        fun({Key, Val}) ->
+            ?assertEqual({ok, Val}, ?MODULE:get(Ref, Key, []))
+        end, KVOut),
+    assert_close(Ref).
+
+%% ===================================================================
+%% QuickCheck Tests
+%% ===================================================================
 
 -ifdef(EQC).
 
@@ -560,55 +757,80 @@ ops(Keys, Values) ->
 apply_kv_ops([], _Ref, Acc0) ->
     Acc0;
 apply_kv_ops([{put, K, V} | Rest], Ref, Acc0) ->
-    ok = eleveldb:put(Ref, K, V, []),
+    ?assertEqual(ok, ?MODULE:put(Ref, K, V, [])),
     apply_kv_ops(Rest, Ref, orddict:store(K, V, Acc0));
 apply_kv_ops([{async_put, K, V} | Rest], Ref, Acc0) ->
     MyRef = make_ref(),
     Context = {my_context, MyRef},
-    ok = eleveldb:async_put(Ref, Context, K, V, []),
+    ?assertEqual(ok, ?MODULE:async_put(Ref, Context, K, V, [])),
     receive
         {Context, ok} ->
             apply_kv_ops(Rest, Ref, orddict:store(K, V, Acc0));
         Msg ->
-            error({unexpected_msg, Msg})
+            erlang:error({unexpected_msg, Msg})
     end;
 apply_kv_ops([{delete, K, _} | Rest], Ref, Acc0) ->
-    ok = eleveldb:delete(Ref, K, []),
+    ?assertEqual(ok, ?MODULE:delete(Ref, K, [])),
     apply_kv_ops(Rest, Ref, orddict:store(K, deleted, Acc0)).
 
-prop_put_delete() ->
+prop_put_delete(TestDir) ->
     ?LET({Keys, Values}, {keys(), values()},
-         ?FORALL(Ops, eqc_gen:non_empty(list(ops(Keys, Values))),
-                 begin
-                     ?cmd("rm -rf /tmp/eleveldb.putdelete.qc"),
-                     {ok, Ref} = eleveldb:open("/tmp/eleveldb.putdelete.qc",
-                                                [{create_if_missing, true}]),
-                     Model = apply_kv_ops(Ops, Ref, []),
+        ?FORALL(Ops, eqc_gen:non_empty(list(ops(Keys, Values))),
+            begin
+                delete_test_dir(TestDir),
+                Ref = assert_open(TestDir, [{create_if_missing, true}]),
+                Model = apply_kv_ops(Ops, Ref, []),
 
-                     %% Valdiate that all deleted values return not_found
-                     F = fun({K, deleted}) ->
-                                 ?assertEqual(not_found, eleveldb:get(Ref, K, []));
-                            ({K, V}) ->
-                                 ?assertEqual({ok, V}, eleveldb:get(Ref, K, []))
-                         end,
-                     lists:map(F, Model),
+                %% Validate that all deleted values return not_found
+                lists:foreach(
+                    fun({K, deleted}) ->
+                        ?assertEqual(not_found, ?MODULE:get(Ref, K, []));
+                    ({K, V}) ->
+                        ?assertEqual({ok, V}, ?MODULE:get(Ref, K, []))
+                end, Model),
 
-                     %% Validate that a fold returns sorted values
-                     Actual = lists:reverse(fold(Ref, fun({K, V}, Acc) -> [{K, V} | Acc] end,
-                                                 [], [])),
-                     ?assertEqual([{K, V} || {K, V} <- Model, V /= deleted],
-                                  Actual),
-                     ok = eleveldb:close(Ref),
-                     true
-                 end)).
+                %% Validate that a fold returns sorted values
+                Actual = lists:reverse(
+                    ?MODULE:fold(Ref, fun({K, V}, Acc) -> [{K, V} | Acc] end, [], [])),
+                ?assertEqual([{K, V} || {K, V} <- Model, V /= deleted], Actual),
+                assert_close(Ref),
+                true
+            end)).
 
 prop_put_delete_test_() ->
     Timeout1 = 10,
     Timeout2 = 15,
-    %% We use the ?ALWAYS(300, ...) wrapper around the second test as a
-    %% regression test.
-    [{timeout, 3*Timeout1, {"No ?ALWAYS()", fun() -> qc(eqc:testing_time(Timeout1,prop_put_delete())) end}},
-     {timeout, 10*Timeout2, {"With ?ALWAYS()", fun() -> qc(eqc:testing_time(Timeout2,?ALWAYS(150,prop_put_delete()))) end}}].
+    {foreach,
+        fun create_test_dir/0,
+        fun delete_test_dir/1,
+        [
+            fun(TestRoot) ->
+                TestDir = filename:join(TestRoot, "putdelete.qc"),
+                InnerTO = Timeout1,
+                OuterTO = (InnerTO * 3),
+                Title   = "Without ?ALWAYS()",
+                TestFun = fun() ->
+                    qc(eqc:testing_time(InnerTO, prop_put_delete(TestDir)))
+                end,
+                {timeout, OuterTO, {Title, TestFun}}
+            end,
+            fun(TestRoot) ->
+                TestDir = filename:join(TestRoot, "putdelete.qc"),
+                InnerTO = Timeout2,
+                OuterTO = (InnerTO * 10),
+                AwCount = (InnerTO * 9),
+                %% We use the ?ALWAYS(AwCount, ...) wrapper as a regression test.
+                %% It's not clear how this is effectively different than the first
+                %% fixture, but I'm leaving it here in case I'm missing something.
+                Title   = lists:flatten(io_lib:format("With ?ALWAYS(~b)", [AwCount])),
+                TestFun = fun() ->
+                    qc(eqc:testing_time(InnerTO,
+                        ?ALWAYS(AwCount, prop_put_delete(TestDir))))
+                end,
+                {timeout, OuterTO, {Title, TestFun}}
+            end
+        ]
+    }.
 
 -endif. % EQC
 
