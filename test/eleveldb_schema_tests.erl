@@ -1,23 +1,37 @@
+%% -------------------------------------------------------------------
+%%
+%% Copyright (c) 2013-2017 Basho Technologies, Inc.
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%
+%% -------------------------------------------------------------------
+
 -module(eleveldb_schema_tests).
 
-%%
-%% The following 2 lines are only activated during builbot
-%%  unit tests.  The buildbot script executes the following:
-%%
-%%    sed -i -e 's/% #!sed //' rebar.config test/eleveldb_schema_tests.erl
-%%
-% #!sed -include_lib("eunit/include/eunit.hrl").
-% #!sed -compile(export_all).
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
 
--compile(nowarn_unused_function).
+%-compile(nowarn_unused_function).
 
 %% basic schema test will check to make sure that all defaults from
 %% the schema make it into the generated app.config
 basic_schema_test() ->
-    %% The defaults are defined in ../priv/eleveldb.schema.
+    %% The defaults are defined in .../priv/eleveldb.schema.
     %% it is the file under test.
     Config = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], [], context(), predefined_schema()),
+        [priv_dir_file("eleveldb.schema")], [], context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config, "eleveldb.data_root", "./data/leveldb"),
     cuttlefish_unit:assert_config(Config, "eleveldb.total_leveldb_mem_percent", 70),
@@ -53,34 +67,34 @@ override_schema_test() ->
     %% Conf represents the riak.conf file that would be read in by cuttlefish.
     %% this proplists is what would be output by the conf_parse module
     Conf = [
-            {["leveldb", "data_root"], "/some/crazy/dir"},
-            {["leveldb", "maximum_memory", "percent"], 50},
-            {["leveldb", "maximum_memory"], "1KB"},
-            {["leveldb", "sync_on_write"], on},
-            {["leveldb", "limited_developer_mem"], on},
-            {["leveldb", "write_buffer_size_min"], "10MB"},
-            {["leveldb", "write_buffer_size_max"], "20MB"},
-            {["leveldb", "bloomfilter"], off},
-            {["leveldb", "block", "size"], "8KB"},
-            {["leveldb", "block", "restart_interval"], 8},
-            {["leveldb", "verify_checksums"], off},
-            {["leveldb", "verify_compaction"], off},
-            {["leveldb", "threads"], 7},
-            {["leveldb", "fadvise_willneed"], true},
-            {["leveldb", "compression"], off},
-            {["leveldb", "compaction", "trigger", "tombstone_count"], off},
-            {["leveldb", "tiered"], "2"},
-            {["leveldb", "tiered", "path", "fast"], "/mnt/speedy"},
-            {["leveldb", "tiered", "path", "slow"], "/mnt/slowpoke"},
-            {["leveldb", "expiration"], on},
-            {["leveldb", "expiration", "retention_time"], "1d"},
-            {["leveldb", "expiration", "mode"], normal}
-           ],
+        {["leveldb", "data_root"], "/some/crazy/dir"},
+        {["leveldb", "maximum_memory", "percent"], 50},
+        {["leveldb", "maximum_memory"], "1KB"},
+        {["leveldb", "sync_on_write"], on},
+        {["leveldb", "limited_developer_mem"], on},
+        {["leveldb", "write_buffer_size_min"], "10MB"},
+        {["leveldb", "write_buffer_size_max"], "20MB"},
+        {["leveldb", "bloomfilter"], off},
+        {["leveldb", "block", "size"], "8KB"},
+        {["leveldb", "block", "restart_interval"], 8},
+        {["leveldb", "verify_checksums"], off},
+        {["leveldb", "verify_compaction"], off},
+        {["leveldb", "threads"], 7},
+        {["leveldb", "fadvise_willneed"], true},
+        {["leveldb", "compression"], off},
+        {["leveldb", "compaction", "trigger", "tombstone_count"], off},
+        {["leveldb", "tiered"], "2"},
+        {["leveldb", "tiered", "path", "fast"], "/mnt/speedy"},
+        {["leveldb", "tiered", "path", "slow"], "/mnt/slowpoke"},
+        {["leveldb", "expiration"], on},
+        {["leveldb", "expiration", "retention_time"], "1d"},
+        {["leveldb", "expiration", "mode"], normal}
+    ],
 
-    %% The defaults are defined in ../priv/eleveldb.schema.
+    %% The defaults are defined in .../priv/eleveldb.schema.
     %% it is the file under test.
     Config = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Conf, context(), predefined_schema()),
+        [priv_dir_file("eleveldb.schema")], Conf, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config, "eleveldb.data_root", "/some/crazy/dir"),
     cuttlefish_unit:assert_config(Config, "eleveldb.total_leveldb_mem_percent", 50),
@@ -115,63 +129,65 @@ override_schema_test() ->
 
 
 compression_schema_test() ->
+    Schema = priv_dir_file("eleveldb.schema"),
+
     %% Case1:  compression disabled, use of algorithm ignored
     Case1 = [
-            {["leveldb", "compression"], off},
-            {["leveldb", "compression", "algorithm"], lz4}
-           ],
+        {["leveldb", "compression"], off},
+        {["leveldb", "compression", "algorithm"], lz4}
+    ],
 
     Config1 = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Case1, context(), predefined_schema()),
+        [Schema], Case1, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config1, "eleveldb.compression", false),
 
     %% Case2:  compression enabled, should pick snappy as default algorithm
     Case2 = [
-            {["leveldb", "compression"], on}
-           ],
+        {["leveldb", "compression"], on}
+    ],
 
     Config2 = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Case2, context(), predefined_schema()),
+        [Schema], Case2, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config2, "eleveldb.compression", snappy),
 
 
     %% Case3:  compression enabled, explicitly set lz4 as algorithm
     Case3 = [
-            {["leveldb", "compression"], on},
-            {["leveldb", "compression", "algorithm"], lz4}
-           ],
+        {["leveldb", "compression"], on},
+        {["leveldb", "compression", "algorithm"], lz4}
+    ],
     Config3 = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Case3, context(), predefined_schema()),
+        [Schema], Case3, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config3, "eleveldb.compression", lz4),
 
 
     %% Case4:  compression enabled, explicitly set snappy as algorithm
     Case4 = [
-            {["leveldb", "compression"], on},
-            {["leveldb", "compression", "algorithm"], snappy}
-           ],
+        {["leveldb", "compression"], on},
+        {["leveldb", "compression", "algorithm"], snappy}
+    ],
     Config4 = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Case4, context(), predefined_schema()),
+        [Schema], Case4, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config4, "eleveldb.compression", snappy),
 
     %% Case5:  compression enabled by default, explicitly set lz4 as algorithm
     Case5 = [
-            {["leveldb", "compression", "algorithm"], lz4}
-           ],
+        {["leveldb", "compression", "algorithm"], lz4}
+    ],
     Config5 = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Case5, context(), predefined_schema()),
+        [Schema], Case5, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config5, "eleveldb.compression", lz4),
 
     %% Case6:  compression enabled by default, snappy by default
     Case6 = [
-           ],
+    ],
     Config6 = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Case6, context(), predefined_schema()),
+        [Schema], Case6, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config6, "eleveldb.compression", snappy),
 
@@ -180,15 +196,17 @@ compression_schema_test() ->
 
 
 expiry_minutes_schema_test() ->
+    Schema = priv_dir_file("eleveldb.schema"),
+
     %% Case1:
     Case1 = [
-            {["leveldb", "expiration"], off},
-            {["leveldb", "expiration", "retention_time"], "2d"},
-            {["leveldb", "expiration", "mode"], whole_file}
-           ],
+        {["leveldb", "expiration"], off},
+        {["leveldb", "expiration", "retention_time"], "2d"},
+        {["leveldb", "expiration", "mode"], whole_file}
+    ],
 
     Config1 = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Case1, context(), predefined_schema()),
+        [Schema], Case1, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config1, "eleveldb.expiry_enabled", false),
     cuttlefish_unit:assert_config(Config1, "eleveldb.expiry_minutes", 2880),
@@ -196,13 +214,13 @@ expiry_minutes_schema_test() ->
 
     %% Case2:
     Case2 = [
-            {["leveldb", "expiration"], on},
-            {["leveldb", "expiration", "retention_time"], unlimited},
-            {["leveldb", "expiration", "mode"], normal}
-           ],
+        {["leveldb", "expiration"], on},
+        {["leveldb", "expiration", "retention_time"], unlimited},
+        {["leveldb", "expiration", "mode"], normal}
+    ],
 
     Config2 = cuttlefish_unit:generate_templated_config(
-        ["../priv/eleveldb.schema"], Case2, context(), predefined_schema()),
+        [Schema], Case2, context(), predefined_schema()),
 
     cuttlefish_unit:assert_config(Config2, "eleveldb.expiry_enabled", true),
     cuttlefish_unit:assert_config(Config2, "eleveldb.expiry_minutes", 0),
@@ -213,16 +231,20 @@ expiry_minutes_schema_test() ->
 
 multi_backend_test() ->
     Conf = [
-            {["multi_backend", "default", "storage_backend"], leveldb},
-            {["multi_backend", "default", "leveldb", "data_root"], "/data/default_leveldb"}
-           ],
-    Config = cuttlefish_unit:generate_templated_config(
-               ["../priv/eleveldb.schema", "../priv/eleveldb_multi.schema", "../test/multi_backend.schema"],
-               Conf, context(), predefined_schema()),
+        {["multi_backend", "default", "storage_backend"], leveldb},
+        {["multi_backend", "default", "leveldb", "data_root"], "/data/default_leveldb"}
+    ],
+    Config = cuttlefish_unit:generate_templated_config([
+        priv_dir_file("eleveldb.schema"),
+        priv_dir_file("eleveldb_multi.schema"),
+        test_dir_file("multi_backend.schema") ],
+        Conf, context(), predefined_schema()),
 
-    MultiBackendConfig = proplists:get_value(multi_backend, proplists:get_value(riak_kv, Config)),
+    MultiBackendConfig = proplists:get_value(multi_backend,
+        proplists:get_value(riak_kv, Config)),
 
-    {<<"default">>, riak_kv_eleveldb_backend, DefaultBackend} = lists:keyfind(<<"default">>, 1, MultiBackendConfig),
+    {<<"default">>, riak_kv_eleveldb_backend, DefaultBackend} = lists:keyfind(<<"default">>, 1,
+        MultiBackendConfig),
 
     cuttlefish_unit:assert_config(DefaultBackend, "data_root", "/data/default_leveldb"),
 
@@ -247,21 +269,26 @@ multi_backend_test() ->
 
 multi_compression_test() ->
     Conf = [
-            {["multi_backend", "FruitLoops", "leveldb", "compression"], off},
+        {["multi_backend", "FruitLoops", "leveldb", "compression"], off},
 
-            {["multi_backend", "Trix", "leveldb", "compression"], on},
-            {["multi_backend", "Trix", "leveldb", "compression", "algorithm"], lz4}
-           ],
-    Config = cuttlefish_unit:generate_templated_config(
-               ["../priv/eleveldb.schema", "../priv/eleveldb_multi.schema", "../test/multi_backend.schema"],
-               Conf, context(), predefined_schema()),
+        {["multi_backend", "Trix", "leveldb", "compression"], on},
+        {["multi_backend", "Trix", "leveldb", "compression", "algorithm"], lz4}
+    ],
+    Config = cuttlefish_unit:generate_templated_config([
+        priv_dir_file("eleveldb.schema"),
+        priv_dir_file("eleveldb_multi.schema"),
+        test_dir_file("multi_backend.schema") ],
+        Conf, context(), predefined_schema()),
 
-    MultiBackendConfig = proplists:get_value(multi_backend, proplists:get_value(riak_kv, Config)),
+    MultiBackendConfig = proplists:get_value(multi_backend,
+        proplists:get_value(riak_kv, Config)),
 
-    {<<"FruitLoops">>, riak_kv_eleveldb_backend, FruitLoopsBackend} = lists:keyfind(<<"FruitLoops">>, 1, MultiBackendConfig),
+    {<<"FruitLoops">>, riak_kv_eleveldb_backend, FruitLoopsBackend} = lists:keyfind(
+        <<"FruitLoops">>, 1, MultiBackendConfig),
     cuttlefish_unit:assert_config(FruitLoopsBackend, "compression", false),
 
-    {<<"Trix">>, riak_kv_eleveldb_backend, TrixBackend} = lists:keyfind(<<"Trix">>, 1, MultiBackendConfig),
+    {<<"Trix">>, riak_kv_eleveldb_backend, TrixBackend} = lists:keyfind(<<"Trix">>, 1,
+        MultiBackendConfig),
     cuttlefish_unit:assert_config(TrixBackend, "compression", lz4),
 
     ok.
@@ -279,9 +306,35 @@ context() -> [].
 %% platform_data_dir
 predefined_schema() ->
     Mapping = cuttlefish_mapping:parse({mapping,
-                                        "platform_data_dir",
-                                        "riak_core.platform_data_dir", [
-                                            {default, "./data"},
-                                            {datatype, directory}
-                                       ]}),
+        "platform_data_dir",
+        "riak_core.platform_data_dir", [
+            {default, "./data"},
+            {datatype, directory}
+        ]}),
     {[], [Mapping], []}.
+
+priv_dir_file(File) ->
+    Key = {?MODULE, priv_dir},
+    Dir = case erlang:get(Key) of
+        undefined ->
+            D = cuttlefish_unit:lib_priv_dir(eleveldb),
+            _ = erlang:put(Key, D),
+            D;
+        Val ->
+            Val
+    end,
+    filename:join(Dir, File).
+
+test_dir_file(File) ->
+    Key = {?MODULE, test_dir},
+    Dir = case erlang:get(Key) of
+        undefined ->
+            D = cuttlefish_unit:lib_test_dir(eleveldb),
+            _ = erlang:put(Key, D),
+            D;
+        Val ->
+            Val
+    end,
+    filename:join(Dir, File).
+
+-endif. % TEST

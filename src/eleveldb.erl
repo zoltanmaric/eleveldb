@@ -66,6 +66,7 @@
     assert_close/1,
     assert_open/1,
     assert_open/2,
+    assert_open_small/1,
     create_test_dir/0,
     delete_test_dir/1,
     terminal_format/2
@@ -73,9 +74,13 @@
 -ifdef(EQC).
 -include_lib("eqc/include/eqc.hrl").
 -define(QC_OUT(P), eqc:on_output(fun terminal_format/2, P)).
--endif.
+-endif. % EQC
 -include_lib("eunit/include/eunit.hrl").
--endif.
+
+%% Maximum number of distinct database instances to create in any test.
+%% This is driven by filesystem size constraints on builders.
+-define(MAX_TEST_OPEN, 49).
+-endif. % TEST
 
 % IF the application name departs from this module's name, this will need to
 % be changed accordingly.
@@ -83,7 +88,7 @@
 
 %% How many previous OTP releases to try if we don't find a NIF library built
 %% with the current version.
--define(OTP_PREV_RELS,  2).
+-define(OTP_PREV_RELS, 2).
 
 %% This cannot be a separate function. Code must be inline to trigger
 %% Erlang compiler's use of optimized selective receive.
@@ -98,56 +103,57 @@
 -type init_result() :: ok | {error, init_error() | [init_error()]}.
 
 -type compression_algorithm() :: snappy | lz4 | false.
--type open_options() :: [{create_if_missing, boolean()} |
-                         {error_if_exists, boolean()} |
-                         {write_buffer_size, pos_integer()} |
-                         {block_size, pos_integer()} |                  %% DEPRECATED
-                         {sst_block_size, pos_integer()} |
-                         {block_restart_interval, pos_integer()} |
-                         {block_size_steps, pos_integer()} |
-                         {paranoid_checks, boolean()} |
-                         {verify_compactions, boolean()} |
-                         {compression, [compression_algorithm()]} |
-                         {use_bloomfilter, boolean() | pos_integer()} |
-                         {total_memory, pos_integer()} |
-                         {total_leveldb_mem, pos_integer()} |
-                         {total_leveldb_mem_percent, pos_integer()} |
-                         {is_internal_db, boolean()} |
-                         {limited_developer_mem, boolean()} |
-                         {eleveldb_threads, pos_integer()} |
-                         {fadvise_willneed, boolean()} |
-                         {block_cache_threshold, pos_integer()} |
-                         {delete_threshold, pos_integer()} |
-                         {tiered_slow_level, pos_integer()} |
-                         {tiered_fast_prefix, string()} |
-                         {tiered_slow_prefix, string()} |
-                         {cache_object_warming, boolean()} |
-                         {expiry_enabled, boolean()} |
-                         {expiry_minutes, pos_integer()} |
-                         {whole_file_expiry, boolean()}
-                        ].
+-type open_options() :: [
+    {create_if_missing, boolean()} |
+    {error_if_exists, boolean()} |
+    {write_buffer_size, pos_integer()} |
+    {block_size, pos_integer()} |                   %% DEPRECATED
+    {sst_block_size, pos_integer()} |
+    {block_restart_interval, pos_integer()} |
+    {block_size_steps, pos_integer()} |
+    {paranoid_checks, boolean()} |
+    {verify_compactions, boolean()} |
+    {compression, [compression_algorithm()]} |
+    {use_bloomfilter, boolean() | pos_integer()} |
+    {total_memory, pos_integer()} |
+    {total_leveldb_mem, pos_integer()} |
+    {total_leveldb_mem_percent, pos_integer()} |
+    {is_internal_db, boolean()} |
+    {limited_developer_mem, boolean()} |
+    {eleveldb_threads, pos_integer()} |
+    {fadvise_willneed, boolean()} |
+    {block_cache_threshold, pos_integer()} |
+    {delete_threshold, pos_integer()} |
+    {tiered_slow_level, pos_integer()} |
+    {tiered_fast_prefix, string()} |
+    {tiered_slow_prefix, string()} |
+    {cache_object_warming, boolean()} |
+    {expiry_enabled, boolean()} |
+    {expiry_minutes, pos_integer()} |
+    {whole_file_expiry, boolean()}
+].
 
 -type read_option() :: {verify_checksums, boolean()} |
-                       {fill_cache, boolean()} |
-                       {iterator_refresh, boolean()}.
+{fill_cache, boolean()} |
+{iterator_refresh, boolean()}.
 
 -type read_options() :: [read_option()].
 
--type fold_option()  :: {first_key, Key::binary()}.
+-type fold_option() :: {first_key, Key :: binary()}.
 -type fold_options() :: [read_option() | fold_option()].
 
 -type write_options() :: [{sync, boolean()}].
 
--type write_actions() :: [{put, Key::binary(), Value::binary()} |
-                          {delete, Key::binary()} |
-                          clear].
+-type write_actions() :: [{put, Key :: binary(), Value :: binary()} |
+{delete, Key :: binary()} |
+clear].
 
 -type iterator_action() :: first | last | next | prev | prefetch | prefetch_stop | binary().
 
 % These are actually NIF 'resource' objects, but need a type less general
 % than term() to make the compiler happy.
 % There is no suitable guard test!
--opaque db_ref()  :: binary().
+-opaque db_ref() :: binary().
 -opaque itr_ref() :: binary().
 
 -spec async_open(reference(), string(), open_options()) -> ok.
@@ -222,27 +228,24 @@ iterator(Ref, Opts, keys_only) ->
     async_iterator(CallerRef, Ref, Opts, keys_only),
     ?WAIT_FOR_REPLY(CallerRef).
 
--spec async_iterator_move(reference()|undefined, itr_ref(), iterator_action()) -> reference() |
-                                                                        {ok, Key::binary(), Value::binary()} |
-                                                                        {ok, Key::binary()} |
-                                                                        {error, invalid_iterator} |
-                                                                        {error, iterator_closed}.
+-spec async_iterator_move(reference() | undefined, itr_ref(), iterator_action())
+            ->  reference() | {ok, Key :: binary(), Value :: binary()} | {ok, Key :: binary()}
+            |   {error, invalid_iterator} | {error, iterator_closed}.
 async_iterator_move(_CallerRef, _IterRef, _IterAction) ->
     erlang:nif_error({error, not_loaded}).
 
--spec iterator_move(itr_ref(), iterator_action()) -> {ok, Key::binary(), Value::binary()} |
-                                                     {ok, Key::binary()} |
-                                                     {error, invalid_iterator} |
-                                                     {error, iterator_closed}.
+-spec iterator_move(itr_ref(), iterator_action())
+            ->  {ok, Key :: binary(), Value :: binary()} | {ok, Key :: binary()}
+            |   {error, invalid_iterator} | {error, iterator_closed}.
 iterator_move(_IRef, _Loc) ->
     case async_iterator_move(undefined, _IRef, _Loc) of
-    Ref when is_reference(Ref) ->
-        receive
-            {Ref, X}                    -> X
-        end;
-    {ok, _}=Key -> Key;
-    {ok, _, _}=KeyVal -> KeyVal;
-    ER -> ER
+        Ref when is_reference(Ref) ->
+            receive
+                {Ref, X} -> X
+            end;
+        {ok, _} = Key -> Key;
+        {ok, _, _} = KeyVal -> KeyVal;
+        ER -> ER
     end.
 
 -spec iterator_close(itr_ref()) -> ok.
@@ -254,7 +257,7 @@ iterator_close(IRef) ->
 async_iterator_close(_CallerRef, _IRef) ->
     erlang:nif_error({error, not_loaded}).
 
--type fold_fun() :: fun(({Key::binary(), Value::binary()}, any()) -> any()).
+-type fold_fun() :: fun(({Key :: binary(), Value :: binary()}, any()) -> any()).
 
 %% Fold over the keys and values in the database
 %% will throw an exception if the database is closed while the fold runs
@@ -263,7 +266,7 @@ fold(Ref, Fun, Acc0, Opts) ->
     {ok, Itr} = iterator(Ref, Opts),
     do_fold(Itr, Fun, Acc0, Opts).
 
--type fold_keys_fun() :: fun((Key::binary(), any()) -> any()).
+-type fold_keys_fun() :: fun((Key :: binary(), any()) -> any()).
 
 %% Fold over the keys in the database
 %% will throw an exception if the database is closed while the fold runs
@@ -272,7 +275,7 @@ fold_keys(Ref, Fun, Acc0, Opts) ->
     {ok, Itr} = iterator(Ref, Opts, keys_only),
     do_fold(Itr, Fun, Acc0, Opts).
 
--spec status(db_ref(), Key::binary()) -> {ok, binary()} | error.
+-spec status(db_ref(), Key :: binary()) -> {ok, binary()} | error.
 status(Ref, Key) ->
     eleveldb_bump:small(),
     status_int(Ref, Key).
@@ -291,6 +294,7 @@ destroy(Name, Opts) ->
     async_destroy(CallerRef, Name, Opts2),
     ?WAIT_FOR_REPLY(CallerRef).
 
+-spec repair(string(), open_options()) -> ok | {error, term()}.
 repair(Name, Opts) ->
     eleveldb_bump:big(),
     repair_int(Name, Opts).
@@ -306,51 +310,52 @@ is_empty(Ref) ->
 is_empty_int(_Ref) ->
     erlang:nif_error({error, not_loaded}).
 
--spec option_types(open | read | write) -> [{atom(), bool | integer | [compression_algorithm()] | any}].
+-spec option_types(open | read | write)
+            -> [{atom(), bool | integer | [compression_algorithm()] | any}].
 option_types(open) ->
     [{create_if_missing, bool},
-     {error_if_exists, bool},
-     {write_buffer_size, integer},
-     {block_size, integer},                            %% DEPRECATED
-     {sst_block_size, integer},
-     {block_restart_interval, integer},
-     {block_size_steps, integer},
-     {paranoid_checks, bool},
-     {verify_compactions, bool},
-     {compression, ?COMPRESSION_ENUM},
-     {use_bloomfilter, any},
-     {total_memory, integer},
-     {total_leveldb_mem, integer},
-     {total_leveldb_mem_percent, integer},
-     {is_internal_db, bool},
-     {limited_developer_mem, bool},
-     {eleveldb_threads, integer},
-     {fadvise_willneed, bool},
-     {block_cache_threshold, integer},
-     {delete_threshold, integer},
-     {tiered_slow_level, integer},
-     {tiered_fast_prefix, any},
-     {tiered_slow_prefix, any},
-     {cache_object_warming, bool},
-     {expiry_enabled, bool},
-     {expiry_minutes, integer},
-     {whole_file_expiry, bool}];
+        {error_if_exists, bool},
+        {write_buffer_size, integer},
+        {block_size, integer},                          %% DEPRECATED
+        {sst_block_size, integer},
+        {block_restart_interval, integer},
+        {block_size_steps, integer},
+        {paranoid_checks, bool},
+        {verify_compactions, bool},
+        {compression, ?COMPRESSION_ENUM},
+        {use_bloomfilter, any},
+        {total_memory, integer},
+        {total_leveldb_mem, integer},
+        {total_leveldb_mem_percent, integer},
+        {is_internal_db, bool},
+        {limited_developer_mem, bool},
+        {eleveldb_threads, integer},
+        {fadvise_willneed, bool},
+        {block_cache_threshold, integer},
+        {delete_threshold, integer},
+        {tiered_slow_level, integer},
+        {tiered_fast_prefix, any},
+        {tiered_slow_prefix, any},
+        {cache_object_warming, bool},
+        {expiry_enabled, bool},
+        {expiry_minutes, integer},
+        {whole_file_expiry, bool}];
 
 option_types(read) ->
     [{verify_checksums, bool},
-     {fill_cache, bool},
-     {iterator_refresh, bool}];
+        {fill_cache, bool},
+        {iterator_refresh, bool}];
 option_types(write) ->
-     [{sync, bool}].
+    [{sync, bool}].
 
 -spec validate_options(open | read | write, [{atom(), any()}]) ->
-                              {[{atom(), any()}], [{atom(), any()}]}.
+    {[{atom(), any()}], [{atom(), any()}]}.
 validate_options(Type, Opts) ->
     Types = option_types(Type),
     lists:partition(fun({K, V}) ->
-                            KType = lists:keyfind(K, 1, Types),
-                            validate_type(KType, V)
-                    end, Opts).
+        KType = lists:keyfind(K, 1, Types),
+        validate_type(KType, V)
+    end, Opts).
 
 
 %% ===================================================================
@@ -365,10 +370,10 @@ add_open_defaults(Opts) ->
         andalso is_pid(whereis(memsup)) of
         true ->
             case proplists:get_value(system_total_memory,
-                                     memsup:get_system_memory_data(),
-                                     undefined) of
+                memsup:get_system_memory_data(),
+                undefined) of
                 N when is_integer(N) ->
-                    [{total_memory, N}|Opts];
+                    [{total_memory, N} | Opts];
                 _ ->
                     Opts
             end;
@@ -391,7 +396,7 @@ do_fold(Itr, Fun, Acc0, Opts) ->
         %% the try clause above will raise an exception, and that's the one we
         %% want to propagate. Catch the exception this raises in that case and
         %% ignore it so we don't obscure the original.
-        catch iterator_close(Itr)
+            catch iterator_close(Itr)
     end.
 
 fold_loop({error, iterator_closed}, _Itr, _Fun, Acc0) ->
@@ -405,14 +410,14 @@ fold_loop({ok, K, V}, Itr, Fun, Acc0) ->
     Acc = Fun({K, V}, Acc0),
     fold_loop(iterator_move(Itr, prefetch), Itr, Fun, Acc).
 
-validate_type({_Key, bool}, true)                            -> true;
-validate_type({_Key, bool}, false)                           -> true;
-validate_type({_Key, integer}, Value) when is_integer(Value) -> true;
-validate_type({_Key, any}, _Value)                           -> true;
-validate_type({_Key, ?COMPRESSION_ENUM}, snappy)             -> true;
-validate_type({_Key, ?COMPRESSION_ENUM}, lz4)                -> true;
-validate_type({_Key, ?COMPRESSION_ENUM}, false)              -> true;
-validate_type(_, _)                                          -> false.
+validate_type({_Key, bool}, true)                               -> true;
+validate_type({_Key, bool}, false)                              -> true;
+validate_type({_Key, integer}, Value) when is_integer(Value)    -> true;
+validate_type({_Key, any}, _Value)                              -> true;
+validate_type({_Key, ?COMPRESSION_ENUM}, snappy)                -> true;
+validate_type({_Key, ?COMPRESSION_ENUM}, lz4)                   -> true;
+validate_type({_Key, ?COMPRESSION_ENUM}, false)                 -> true;
+validate_type(_, _)                                             -> false.
 
 
 %% ===================================================================
@@ -452,10 +457,10 @@ init_nif_lib() ->
         lists:seq(Otp, (Otp - ?OTP_PREV_RELS), -1), Prefix, AppEnv, []).
 
 -spec init_nif_lib(
-        Vers    :: [pos_integer()],
-        Prefix  :: string(),
-        AppEnv  :: [{atom(), term()}],
-        Errors  :: [init_error()] ) -> init_result().
+        Vers :: [pos_integer()],
+        Prefix :: string(),
+        AppEnv :: [{atom(), term()}],
+        Errors :: [init_error()]) -> init_result().
 %% Called for each OTP candidate release in descending order until a NIF
 %% library built with that release is found and successfully loaded.
 init_nif_lib([Ver | Vers], Prefix, AppEnv, Errors) ->
@@ -508,6 +513,14 @@ assert_open(DbPath, OpenOpts) ->
     {_, DbRef} = OpenRet,
     DbRef.
 
+-spec assert_open_small(DbPath :: string()) -> db_ref() | no_return().
+%
+% Opens Path inside an ?assert... macro, using a limited storage footprint
+% and creating the database directory if needed.
+%
+assert_open_small(DbPath) ->
+    assert_open(DbPath, [{create_if_missing, true}, {limited_developer_mem, true}]).
+
 -spec create_test_dir() -> string() | no_return().
 %
 % Creates a new, empty, uniquely-named directory for testing and returns
@@ -537,13 +550,15 @@ terminal_format(Fmt, Args) ->
 %% EUnit Tests
 %% ===================================================================
 
--define(local_test(TestFunc),
+-define(local_test(Timeout, TestFunc),
     fun(TestRoot) ->
         Title = erlang:atom_to_list(TestFunc),
         TestDir = filename:join(TestRoot, TestFunc),
-        {Title, fun() -> TestFunc(TestDir) end}
+        {Title, {timeout, Timeout, fun() -> TestFunc(TestDir) end}}
     end
 ).
+-define(local_test(TestFunc), ?local_test(10, TestFunc)).
+-define(max_test_open(Calc), erlang:min(?MAX_TEST_OPEN, Calc)).
 
 eleveldb_test_() ->
     {foreach,
@@ -560,22 +575,15 @@ eleveldb_test_() ->
             % On weak machines the following can take a while, so we tweak
             % them a bit to avoid timeouts. On anything resembling a competent
             % computer, these should complete in a small fraction of a second,
-            % well under the default 5 second timeout, but on lightweight VMs
-            % used for validation, that can be extended by orders of magnitude.
-            % Anything that can't run a test that should complete comfortably
-            % in a tenth of a second within 150 times that doesn't deserve to
-            % be called a computer.
-            fun(TestRoot) ->
-                TestName = "test_compression",
-                TestDir = filename:join(TestRoot, TestName),
-                {TestName, {timeout, 15, fun() -> test_compression(TestDir) end}}
-            end,
+            % but on some lightweight VMs used for validation, that can be
+            % extended by orders of magnitude.
+            ?local_test(15, test_compression),
             fun(TestRoot) ->
                 TestName = "test_open_many",
                 TestDir = filename:join(TestRoot, TestName),
-                Count = (erlang:system_info(schedulers) * 4 + 1),
+                Count = ?max_test_open(erlang:system_info(schedulers) * 4 + 1),
                 Title = lists:flatten(io_lib:format("~s(~b)", [TestName, Count])),
-                {Title, {timeout, 15, fun() -> test_open_many(TestDir, Count) end}}
+                {Title, {timeout, 30, fun() -> test_open_many(TestDir, Count) end}}
             end
         ]
     }.
@@ -596,14 +604,18 @@ test_open(TestDir) ->
     assert_close(Ref).
 
 test_open_many(TestDir, HowMany) ->
-    Insts   = lists:seq(1, HowMany),
-    KNonce  = erlang:make_ref(),
-    VNonce  = erlang:self(),
-    WorkSet = [{
-        assert_open(lists:flatten(io_lib:format("~s.~b", [TestDir, N]))),
-        erlang:integer_to_binary(erlang:phash2([os:timestamp(), KNonce, N])),
-        erlang:integer_to_binary(erlang:phash2([os:timestamp(), VNonce, N]))}
-        || N <- Insts],
+    Insts = lists:seq(1, HowMany),
+    KNonce = erlang:make_ref(),
+    VNonce = erlang:self(),
+    WorkSet = [
+        begin
+            D = lists:flatten(io_lib:format("~s.~b", [TestDir, N])),
+            T = os:timestamp(),
+            K = erlang:phash2([T, N, KNonce], 1 bsl 32),
+            V = erlang:phash2([N, T, VNonce], 1 bsl 32),
+            {assert_open_small(D),
+                <<K:32/unsigned>>, <<V:32/unsigned, 0:64, K:32/unsigned>>}
+        end || N <- Insts],
     lists:foreach(
         fun({Ref, Key, Val}) ->
             ?assertEqual(ok, ?MODULE:put(Ref, Key, Val, []))
@@ -692,17 +704,17 @@ test_compression(TestDir) ->
 
 test_close_fold(TestDir) ->
     Ref = assert_open(TestDir),
-    ?assertEqual(ok, ?MODULE:put(Ref, <<"k">>,<<"v">>,[])),
+    ?assertEqual(ok, ?MODULE:put(Ref, <<"k">>, <<"v">>, [])),
     ?assertError(badarg,
-        ?MODULE:fold(Ref, fun(_,_) -> assert_close(Ref) end, undefined, [])).
+        ?MODULE:fold(Ref, fun(_, _) -> assert_close(Ref) end, undefined, [])).
 
 %
 % Parallel tests
 %
 
 parallel_test_() ->
-    ParaCnt = (erlang:system_info(schedulers) * 2 + 1),
-    LoadCnt = 199,
+    ParaCnt = ?max_test_open(erlang:system_info(schedulers) * 2 + 1),
+    LoadCnt = 99,
     TestSeq = lists:seq(1, ParaCnt),
     {foreach,
         fun create_test_dir/0,
@@ -718,18 +730,21 @@ parallel_test_() ->
     }.
 
 run_load(TestDir, IntSeq) ->
-    Nonce   = [os:timestamp(), erlang:self()],
-    KVIn    = [{
-        erlang:integer_to_binary(erlang:phash2([erlang:make_ref(), N | Nonce])),
-        erlang:integer_to_binary(erlang:phash2([N, erlang:make_ref() | Nonce]))
-        } || N <- IntSeq],
-    {L, R}  = lists:split(erlang:hd(IntSeq), KVIn),
-    KVOut   = R ++ L,
-    Ref     = assert_open(TestDir),
+    KNonce = [os:timestamp(), erlang:self()],
+    Ref = assert_open_small(TestDir),
+    VNonce = [erlang:make_ref(), os:timestamp()],
+    KVIn = [
+        begin
+            K = erlang:phash2([N | KNonce], 1 bsl 32),
+            V = erlang:phash2([N | VNonce], 1 bsl 32),
+            {<<K:32/unsigned>>, <<V:32/unsigned, 0:64, K:32/unsigned>>}
+        end || N <- IntSeq],
     lists:foreach(
         fun({Key, Val}) ->
             ?assertEqual(ok, ?MODULE:put(Ref, Key, Val, []))
         end, KVIn),
+    {L, R} = lists:split(erlang:hd(IntSeq), KVIn),
+    KVOut = R ++ L,
     lists:foreach(
         fun({Key, Val}) ->
             ?assertEqual({ok, Val}, ?MODULE:get(Ref, Key, []))
@@ -785,9 +800,9 @@ prop_put_delete(TestDir) ->
                 lists:foreach(
                     fun({K, deleted}) ->
                         ?assertEqual(not_found, ?MODULE:get(Ref, K, []));
-                    ({K, V}) ->
-                        ?assertEqual({ok, V}, ?MODULE:get(Ref, K, []))
-                end, Model),
+                        ({K, V}) ->
+                            ?assertEqual({ok, V}, ?MODULE:get(Ref, K, []))
+                    end, Model),
 
                 %% Validate that a fold returns sorted values
                 Actual = lists:reverse(
@@ -808,7 +823,7 @@ prop_put_delete_test_() ->
                 TestDir = filename:join(TestRoot, "putdelete.qc"),
                 InnerTO = Timeout1,
                 OuterTO = (InnerTO * 3),
-                Title   = "Without ?ALWAYS()",
+                Title = "Without ?ALWAYS()",
                 TestFun = fun() ->
                     qc(eqc:testing_time(InnerTO, prop_put_delete(TestDir)))
                 end,
@@ -822,7 +837,7 @@ prop_put_delete_test_() ->
                 %% We use the ?ALWAYS(AwCount, ...) wrapper as a regression test.
                 %% It's not clear how this is effectively different than the first
                 %% fixture, but I'm leaving it here in case I'm missing something.
-                Title   = lists:flatten(io_lib:format("With ?ALWAYS(~b)", [AwCount])),
+                Title = lists:flatten(io_lib:format("With ?ALWAYS(~b)", [AwCount])),
                 TestFun = fun() ->
                     qc(eqc:testing_time(InnerTO,
                         ?ALWAYS(AwCount, prop_put_delete(TestDir))))
