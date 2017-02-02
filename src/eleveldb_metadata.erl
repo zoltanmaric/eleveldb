@@ -48,6 +48,9 @@ start_link() ->
     Fun = fun riak_core_bucket:get_bucket/1,
     Pid = proc_lib:spawn_link(?MODULE, callback_router,
                               [Fun, self(), sys:debug_options([])]),
+
+    %% Inform leveldb where to send messages
+    eleveldb:property_cache(set_pid, Pid),
     {ok, Pid}.
 
 -spec callback_router(fun(), pid(), term()) -> ok.
