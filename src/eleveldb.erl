@@ -133,14 +133,15 @@
     {whole_file_expiry, boolean()}
 ].
 
--type read_option() :: {verify_checksums, boolean()} |
-{fill_cache, boolean()} |
-{iterator_refresh, boolean()}.
+-type read_opt_bool_key() :: fill_cache | iterator_refresh | verify_checksums.
+-type read_option() :: {read_opt_bool_key(), boolean()}.
 
 -type read_options() :: [read_option()].
 
 -type fold_option() :: {first_key, Key :: binary()}.
 -type fold_options() :: [read_option() | fold_option()].
+
+-type iter_options() :: fold_options(). % must allow all options that might reach it
 
 -type write_options() :: [{sync, boolean()}].
 
@@ -208,21 +209,21 @@ async_put(Ref, Context, Key, Value, Opts) ->
 async_write(_CallerRef, _Ref, _Updates, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
--spec async_iterator(reference(), db_ref(), read_options()) -> ok.
+-spec async_iterator(reference(), db_ref(), iter_options()) -> ok.
 async_iterator(_CallerRef, _Ref, _Opts) ->
     erlang:nif_error({error, not_loaded}).
 
--spec async_iterator(reference(), db_ref(), read_options(), keys_only) -> ok.
+-spec async_iterator(reference(), db_ref(), iter_options(), keys_only) -> ok.
 async_iterator(_CallerRef, _Ref, _Opts, keys_only) ->
     erlang:nif_error({error, not_loaded}).
 
--spec iterator(db_ref(), read_options()) -> {ok, itr_ref()}.
+-spec iterator(db_ref(), iter_options()) -> {ok, itr_ref()}.
 iterator(Ref, Opts) ->
     CallerRef = make_ref(),
     async_iterator(CallerRef, Ref, Opts),
     ?WAIT_FOR_REPLY(CallerRef).
 
--spec iterator(db_ref(), read_options(), keys_only) -> {ok, itr_ref()}.
+-spec iterator(db_ref(), iter_options(), keys_only) -> {ok, itr_ref()}.
 iterator(Ref, Opts, keys_only) ->
     CallerRef = make_ref(),
     async_iterator(CallerRef, Ref, Opts, keys_only),
@@ -381,7 +382,8 @@ add_open_defaults(Opts) ->
             Opts
     end.
 
-
+-spec do_fold(Itr :: itr_ref(), Fun :: fold_fun(), Acc0 :: any(), Opts :: fold_options())
+            -> any().
 do_fold(Itr, Fun, Acc0, Opts) ->
     try
         %% Extract {first_key, binary()} and seek to that key as a starting
@@ -396,7 +398,7 @@ do_fold(Itr, Fun, Acc0, Opts) ->
         %% the try clause above will raise an exception, and that's the one we
         %% want to propagate. Catch the exception this raises in that case and
         %% ignore it so we don't obscure the original.
-            catch iterator_close(Itr)
+        catch iterator_close(Itr)
     end.
 
 fold_loop({error, iterator_closed}, _Itr, _Fun, Acc0) ->
