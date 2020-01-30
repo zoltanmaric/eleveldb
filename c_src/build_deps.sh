@@ -73,7 +73,12 @@ case "$1" in
         fi
 
         if [ ! -f system/lib/libsnappy.a ]; then
-            (cd snappy-$SNAPPY_VSN && $MAKE && $MAKE install)
+	    # Use libc++ for MacOS
+	    if [[ "$OSTYPE" == "darwin"* ]]; then
+                (cd snappy-$SNAPPY_VSN && $MAKE -stdlib=libc++ && $MAKE -stdlib=libc++ install)
+	    else
+                (cd snappy-$SNAPPY_VSN && $MAKE && $MAKE install)
+	    fi
         fi
 
         export CFLAGS="$CFLAGS -I $BASEDIR/system/include"
